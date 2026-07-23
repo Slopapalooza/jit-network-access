@@ -395,7 +395,16 @@ function jitaccess:api()
     local origins = type(body.origins) == "table" and body.origins or {}
     local ok, err = self.store:enroll_code_put(code, { kid = body.kid, origins = origins }, ttl)
     if not ok then return self:ret(true, "code create failed: " .. tostring(err), ngx.HTTP_INTERNAL_SERVER_ERROR) end
-    return self:ret(true, cjson.encode({ code = code, kid = body.kid, ttl = ttl, origins = origins }), ngx.HTTP_OK)
+    local resp = { code = code, kid = body.kid, ttl = ttl, origins = origins }
+    -- A registration URL the admin hands to a user: browsing to it lets the
+    -- extension pick up the token (it intercepts <server>/.well-known/jit-access/
+    -- register before the request is served). Assumes the default URI prefix.
+    if type(body.server) == "string" and body.server:match("^https://[^/]") then
+      local base = body.server:gsub("/+$", "")
+      resp.register_url = base .. "/.well-known/jit-access/register?code=" .. code
+      if #origins > 0 then resp.register_url = resp.register_url .. "&origins=" .. table.concat(origins, ",") end
+    end
+    return self:ret(true, cjson.encode(resp), ngx.HTTP_OK)
   end
 
   return self:ret(true, "unknown jitaccess endpoint", ngx.HTTP_NOT_FOUND)
