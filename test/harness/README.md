@@ -90,3 +90,13 @@ M1 was run end-to-end against a live BunkerWeb 1.6.10 (Linux-package) install, i
 - **`limit`** (request rate limiter) can return 429 under rapid testing; disable (`USE_LIMIT_REQ=no`) or pace requests when scripting the matrix.
 
 Everything installed for the test (plugin, `jittest.local` service, temp upstream) is removable via the control API (`DELETE /services/{name}`, `DELETE /plugins/jitaccess`), which restores the instance to its prior state.
+
+## M2 — knock protocol conformance
+
+The compose stack configures two token-scoped services (`app-a.local` → `kid_a_test`, `app-b.local` → `kid_b_test`) with the token registry set globally. After `./run.sh`, drive the full challenge/respond handshake:
+
+```bash
+cd test/conformance && ./run.sh     # needs python3 + curl on the host; harness publishes :8443
+```
+
+Asserts (**also verified on a live BunkerWeb 1.6.10**): `kid_a` unlocks `app-a` (KNOCK 204 → SERVICE 200) but is rejected by `app-b` (per-service allow-list), a **replayed nonce is rejected** (REPLAY 403), and `kid_b` unlocks `app-b`. The knock client (`test/conformance/knock_client.py`) uses the shared Python crypto (`core/py/jitcrypto.py`) — the same constructions the Lua server verifies — so a green run is genuine cross-implementation interop.
