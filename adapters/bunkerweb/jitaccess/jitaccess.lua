@@ -236,6 +236,33 @@ function jitaccess:respond(sname, ip)
   return self:deny("jit knock rejected")
 end
 
+-- POST /enroll {code}: exchange a single-use enrollment code for the token
+-- secret. Response is a 204 carrying the material in headers (the access phase
+-- can't cleanly emit a body under BunkerWeb's dispatcher); over TLS + single-use
+-- code this is fine, and the secret never rode in a QR/URL (DESIGN §6.1 / R5).
+function jitaccess:enroll(sname, ip)
+  if not self:rate_ok(ip) then return self:deny("jit enroll rate-limited") end
+  ngx.req.read_body()
+  local data = ngx.req.get_body_data()
+  local body = data and cjson.decode(data) or {}
+  if type(body) ~= "table" or type(body.code) ~= "string" then
+    return self:deny("jit enroll bad request")
+  end
+  local rec = self.store:enroll_code_consume(body.code)   -- single-use
+  if not rec then return self:deny("jit enroll invalid/used code") end
+  local token = self.registry:lookup(rec.kid)
+  if not token then return self:deny("jit enroll unknown kid") end
+  pcall(function()
+    ngx.header["X-JIT-Kid"] = rec.kid
+    ngx.header["X-JIT-Secret"] = ccrypto.b64u_encode(token.secret)
+    ngx.header["X-JIT-Alg"] = token.alg or "HMAC-SHA256"
+    ngx.header["X-JIT-Origins"] = table.concat(rec.origins or {}, ",")
+    ngx.header["Cache-Control"] = "no-store"
+  end)
+  self:metric("counters", "jit_enroll_ok", 1)
+  return self:ret(true, "jit enroll ok", ngx.HTTP_NO_CONTENT)
+end
+
 -- ---- phases ----------------------------------------------------------------
 
 function jitaccess:set()
@@ -278,8 +305,10 @@ function jitaccess:_access()
     return self:challenge(sname, ip)
   elseif uri == prefix .. "/respond" and method == "POST" then
     return self:respond(sname, ip)
+  elseif uri == prefix .. "/enroll" and method == "POST" then
+    return self:enroll(sname, ip)
   elseif uri == prefix or uri:sub(1, #prefix + 1) == prefix .. "/" then
-    return self:deny("jit protocol endpoint")   -- /enroll etc. are future (v2/v3)
+    return self:deny("jit protocol endpoint")
   end
 
   -- Grant check
@@ -353,6 +382,20 @@ function jitaccess:api()
     if not body.kid then return self:ret(true, "kid required", ngx.HTTP_BAD_REQUEST) end
     local n = self.store:revoke_token(body.kid)
     return self:ret(true, cjson.encode({ revoked_token = body.kid, grants_removed = n }), ngx.HTTP_OK)
+  end
+
+  if method == "POST" and uri == "/jitaccess/enroll-code" then
+    if type(body.kid) ~= "string" or not self.registry:lookup(body.kid) then
+      return self:ret(true, "known kid required", ngx.HTTP_BAD_REQUEST)
+    end
+    local rand = ccrypto.random_bytes(12)
+    if not rand then return self:ret(true, "rng failed", ngx.HTTP_INTERNAL_SERVER_ERROR) end
+    local code = ccrypto.b64u_encode(rand)
+    local ttl = tonumber(body.ttl) or 900
+    local origins = type(body.origins) == "table" and body.origins or {}
+    local ok, err = self.store:enroll_code_put(code, { kid = body.kid, origins = origins }, ttl)
+    if not ok then return self:ret(true, "code create failed: " .. tostring(err), ngx.HTTP_INTERNAL_SERVER_ERROR) end
+    return self:ret(true, cjson.encode({ code = code, kid = body.kid, ttl = ttl, origins = origins }), ngx.HTTP_OK)
   end
 
   return self:ret(true, "unknown jitaccess endpoint", ngx.HTTP_NOT_FOUND)

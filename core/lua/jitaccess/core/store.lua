@@ -149,6 +149,32 @@ function methods:list()
   return out
 end
 
+-- ---- enrollment codes (single-use, TTL) ------------------------------------
+-- Admin-issued one-time codes that the client exchanges at /enroll for its
+-- token secret, so the secret is never placed in a QR/URL (DESIGN §6.1 / R5).
+-- Stored in the dedicated nonce dict (ephemeral, single-use) under an ec: prefix.
+
+local ENROLL_PREFIX = "jit:ec:"
+
+function methods:enroll_code_put(code, data, ttl)
+  if self.redis then return nil, "hardened redis backend not implemented" end
+  local json = cjson.encode(data)
+  if not json then return nil, "encode failed" end
+  local ok, err = self.nonces:set(ENROLL_PREFIX .. code, json, ttl)
+  if not ok then return nil, err end
+  return true
+end
+
+-- Consume a code (single-use): returns its data table, or nil. Delete-after-read.
+function methods:enroll_code_consume(code)
+  if self.redis then return nil end
+  local key = ENROLL_PREFIX .. code
+  local json = self.nonces:get(key)
+  if not json then return nil end
+  self.nonces:delete(key)
+  return cjson.decode(json)
+end
+
 -- ---- NonceStore (single-use claim) -----------------------------------------
 
 -- Atomically claim a nonce as spent. id = base64url/hex of the nonce's rand.

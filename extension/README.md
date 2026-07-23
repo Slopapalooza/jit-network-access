@@ -32,7 +32,7 @@ Visit `https://app-a.local:8443` — it should open after a silent knock.
 ## Security properties (DESIGN §7 / §11 R6)
 
 - Auto-knock only on **top-level, main-frame** navigations (`frameId === 0`), never subframes / `window.open` — a hidden `<iframe>` on a hostile page cannot make the extension knock (confused-deputy fix).
-- `externally_connectable` is **closed** and there are no external listeners; internal messages are `sender`-validated, the worker derives the origin from the **authenticated tab URL** (never the message), and a **proof is never returned across a message boundary** (signing-oracle fix).
+- **No external messaging surface:** the manifest omits `externally_connectable` (web pages can't connect) and the worker registers **zero** `onMessageExternal`/`onConnectExternal` listeners, so a co-installed extension has nothing to invoke. Internal messages are `sender`-validated, the worker derives the origin from the **authenticated tab URL** (never the message), and a **proof is never returned across a message boundary** (signing-oracle fix). *Do not add any `*External` listener.*
 - **Exact-origin** matching (scheme+host+port); **HTTPS-only**.
 - Per-tab attempt cap + single-flight + backoff (no knock/reload storms).
 - Secret is a **non-extractable** key in IndexedDB; config in `storage.local`; grant cache in `storage.session`; **never** `storage.sync`.

@@ -124,5 +124,8 @@
       "every": "once",
       "reload": true
     }
-  ]
+  ],
+  "bwcli": {
+    "token": "token.py"
+  }
 }

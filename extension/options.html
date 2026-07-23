@@ -18,8 +18,9 @@
 <body>
   <h1>JIT Network Access</h1>
   <h2>Enroll a device token</h2>
-  <p class="muted">Paste the setup string from your admin:<br>
-    <code>jitaccess://enroll?v=1&amp;kid=&lt;kid&gt;&amp;secret=&lt;b64url&gt;&amp;origins=https://app.example.com&amp;label=&lt;name&gt;</code>
+  <p class="muted">Paste the setup string from your admin. Recommended (one-time code — the secret is fetched over TLS, never in the string):<br>
+    <code>jitaccess://enroll?v=1&amp;server=https://app.example.com&amp;code=&lt;one-time-code&gt;&amp;origins=https://app.example.com&amp;label=&lt;name&gt;</code><br>
+    <span style="font-size:12px">Also accepted (direct import, prototype): <code>…&amp;kid=&lt;kid&gt;&amp;secret=&lt;b64url&gt;&amp;origins=…</code></span>
   </p>
   <textarea id="setup" placeholder="jitaccess://enroll?v=1&kid=...&secret=...&origins=https://app.example.com"></textarea>
   <p><button id="enroll">Enroll</button> <span id="msg" class="muted"></span></p>
