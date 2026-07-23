@@ -47,7 +47,7 @@ Roadmap lives in [`DESIGN.md` §9](DESIGN.md). Current increment:
 - [x] **M0** — protocol + core spec + verified conformance vectors + Lua core library
 - [x] **M1** — BunkerWeb plugin gate + local grants (Simple, no Redis). **Validated end-to-end on a real BunkerWeb 1.6.10 instance** (5/5 matrix: dark-by-default, interstitial marker, grant admits, protocol-endpoint stays dark, revoke re-darkens; `api()` grant/revoke working; no impact on co-hosted services). Docker harness in `test/harness/` for reproducing locally.
 - [x] **M2** — challenge/knock protocol end-to-end. **Validated on real BunkerWeb 1.6.10**: the Python knock client (`core/py/jitcrypto`) completes the challenge→HMAC-proof→respond handshake against the Lua server (`core/lua`), unlocking service A but not B (per-service token allow-list), with replay of a used nonce rejected. Cross-language conformance proven, not just vector-matched.
-- [ ] **M2.5** — security conformance suite
+- [x] **M2.5** — security conformance suite (`test/conformance/security_suite.py`), **12/12 green on real BunkerWeb**. Probes: malformed `/respond` (never opens the gate), tampered proof/nonce, cross-service proof isolation, replay, unknown-kid no-oracle, forged `X-Forwarded-For`/`X-Real-IP`, path traversal. **This suite caught a real vulnerability** on the test server (`USE_REAL_IP` with broad RFC1918 trust let a forged XFF inherit another IP's grant — SECURITY-REVIEW C2/R2); fixed by keying on the un-forgeable TCP peer (`$realip_remote_addr`), with `JIT_ACCESS_TRUST_REALIP` as the Hardened opt-in.
 - [ ] **M3** — extension MVP
 - [ ] **M4** — admin UX + Simple quickstart docs
 - [ ] **M5** — standalone Authorizer + native Caddy module (Simple, no Redis)
