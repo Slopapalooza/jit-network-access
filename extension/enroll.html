@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>JIT Network Access — Enroll device</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; margin: 3rem auto; max-width: 460px; padding: 0 1rem; }
+    h1 { font-size: 1.3rem; }
+    ul { padding-left: 1.2rem; }
+    code { background: #f4f4f4; padding: 0 .25rem; border-radius: 3px; }
+    button { padding: .5rem 1.2rem; cursor: pointer; font-size: 1rem; }
+    a { font-size: .9rem; }
+    .muted { color: #666; }
+    .err { color: #b04444; }
+    .ok { color: #2a8a5a; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>JIT Network Access</h1>
+  <div id="box">
+    <p>Enroll this browser so it can silently unlock:</p>
+    <ul id="origins"></ul>
+    <p class="muted">Enrolling grants this extension permission to those sites and stores a device key (non-extractable) in the browser.</p>
+    <p><button id="enroll">Enroll this device</button> &nbsp; <a href="#" id="cancel">Cancel</a></p>
+    <p id="msg" class="muted"></p>
+  </div>
+  <script type="module" src="src/enroll_page.js"></script>
+</body>
+</html>
