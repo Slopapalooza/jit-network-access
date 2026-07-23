@@ -1,0 +1,119 @@
+{
+  "id": "jitaccess",
+  "name": "JIT Network Access",
+  "description": "Keep a service dark until a paired browser extension answers a time-based challenge; a valid knock creates a temporary, self-expiring allow entry. Simple mode needs no external dependencies.",
+  "version": "0.1.0",
+  "stream": "no",
+  "settings": {
+    "USE_JIT_ACCESS": {
+      "context": "multisite",
+      "default": "no",
+      "help": "Gate this service behind JIT Network Access (dark until a valid knock).",
+      "id": "use-jit-access",
+      "label": "Enable JIT Network Access",
+      "regex": "^(yes|no)$",
+      "type": "check"
+    },
+    "JIT_ACCESS_TOKENS": {
+      "context": "multisite",
+      "default": "",
+      "help": "Space-separated token kids allowed to unlock THIS service, or '*' for any registered token. Empty = no device may unlock it.",
+      "id": "jit-access-tokens",
+      "label": "Allowed token kids",
+      "regex": "^( *| *\\*| *([A-Za-z0-9_-]+ *)+)$",
+      "type": "text"
+    },
+    "JIT_ACCESS_GRANT_TIME": {
+      "context": "multisite",
+      "default": "3600",
+      "help": "Grant lifetime in seconds (e.g. 3600=1h, 7200=2h, 86400=24h). The allow entry expires automatically.",
+      "id": "jit-access-grant-time",
+      "label": "Grant TTL (seconds)",
+      "regex": "^[1-9][0-9]{1,6}$",
+      "type": "text"
+    },
+    "JIT_ACCESS_FAILURE_MODE": {
+      "context": "multisite",
+      "default": "interstitial",
+      "help": "How an ungranted request is answered. 'interstitial' shows a clear page + detection marker (best UX). 'stealth' returns a generic 404 (gate invisible; Hardened).",
+      "id": "jit-access-failure-mode",
+      "label": "Failure mode",
+      "regex": "^(interstitial|stealth)$",
+      "select": ["interstitial", "stealth"],
+      "type": "select"
+    },
+    "JIT_ACCESS_BINDING": {
+      "context": "multisite",
+      "default": "ip",
+      "help": "Grant binding. 'ip' (Simple) admits the client IP. 'ip+cookie' (Hardened) also requires a device-bound cookie; recommended for shared-egress or no-downstream-auth services.",
+      "id": "jit-access-binding",
+      "label": "Grant binding",
+      "regex": "^(ip|ip\\+cookie)$",
+      "select": ["ip", "ip+cookie"],
+      "type": "select"
+    },
+    "JIT_ACCESS_SKIP_CHECKS": {
+      "context": "multisite",
+      "default": "no",
+      "help": "If yes, a valid grant short-circuits the rest of the security pipeline (whitelist semantics). Default no keeps WAF/rate-limit/etc. running behind the grant. Enabling this is a sharp edge — pair with ip+cookie.",
+      "id": "jit-access-skip-checks",
+      "label": "Grant skips remaining checks",
+      "regex": "^(yes|no)$",
+      "type": "check"
+    },
+    "JIT_ACCESS_URI_PREFIX": {
+      "context": "multisite",
+      "default": "/.well-known/jit-access",
+      "help": "Base path for the challenge/respond/enroll endpoints on the protected origin.",
+      "id": "jit-access-uri-prefix",
+      "label": "Protocol URI prefix",
+      "regex": "^/[A-Za-z0-9._~/-]+$",
+      "type": "text"
+    },
+    "JIT_ACCESS_NONCE_TTL": {
+      "context": "global",
+      "default": "60",
+      "help": "Seconds a challenge nonce remains valid. Dominates knock freshness (there is no client-supplied time field).",
+      "id": "jit-access-nonce-ttl",
+      "label": "Nonce TTL (seconds)",
+      "regex": "^[1-9][0-9]{0,3}$",
+      "type": "text"
+    },
+    "JIT_ACCESS_IPV6_PREFIX": {
+      "context": "global",
+      "default": "128",
+      "help": "IPv6 grant granularity. 128 = exact address (Simple, recommended). 64 = whole /64 segment (Hardened; admits a LAN segment — pair with ip+cookie).",
+      "id": "jit-access-ipv6-prefix",
+      "label": "IPv6 grant prefix",
+      "regex": "^(0|[1-9][0-9]?|1[01][0-9]|12[0-8])$",
+      "type": "text"
+    },
+    "JIT_ACCESS_RATELIMIT": {
+      "context": "global",
+      "default": "10r/m",
+      "help": "Rate limit for the knock endpoints per source IP. Tune above office/CGNAT scale if many users share an egress IP. Knock failures never feed badbehavior.",
+      "id": "jit-access-ratelimit",
+      "label": "Knock endpoint rate limit",
+      "regex": "^[1-9][0-9]*r/[smhd]$",
+      "type": "text"
+    },
+    "JIT_ACCESS_TOKEN": {
+      "context": "global",
+      "default": "",
+      "help": "Token registry entry: 'kid:base64url_secret:label[:expiry_unix]'. Add more as JIT_ACCESS_TOKEN_1, _2, ... Simple mode stores these like other server secrets; Hardened encrypts at rest (KEK) or uses asymmetric keys.",
+      "id": "jit-access-token",
+      "label": "Registered token",
+      "regex": "^$|^[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:[^:]*(:[0-9]+)?$",
+      "type": "password",
+      "multiple": "token"
+    }
+  },
+  "jobs": [
+    {
+      "name": "jitaccess-registry",
+      "file": "jitaccess-registry.py",
+      "every": "once",
+      "reload": true
+    }
+  ]
+}
