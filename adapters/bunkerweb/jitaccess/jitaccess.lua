@@ -130,8 +130,20 @@ function jitaccess:ipv6_prefix()
 end
 
 function jitaccess:client_ip_canon()
-  -- Simple mode: the TCP peer. Trusting X-Forwarded-* is Hardened only (R2).
-  local ip = (ngx.ctx.bw and ngx.ctx.bw.remote_addr) or ngx.var.remote_addr
+  -- SECURITY (R2 / SECURITY-REVIEW C2): key grants on an IP the client cannot
+  -- forge. BunkerWeb's realip rewrites ngx.var.remote_addr from X-Forwarded-For /
+  -- X-Real-IP when USE_REAL_IP=yes, so remote_addr is spoofable on any instance
+  -- with realip enabled. Default (Simple) therefore uses $realip_remote_addr —
+  -- the actual TCP peer nginx preserves before realip — which cannot be moved by
+  -- a request header. Hardened deployments genuinely behind a trusted proxy set
+  -- JIT_ACCESS_TRUST_REALIP=yes to key on the resolved client instead (only safe
+  -- with a correctly narrowed REAL_IP_FROM).
+  local ip
+  if self.variables and self.variables["JIT_ACCESS_TRUST_REALIP"] == "yes" then
+    ip = (ngx.ctx.bw and ngx.ctx.bw.remote_addr) or ngx.var.remote_addr
+  else
+    ip = ngx.var.realip_remote_addr or ngx.var.remote_addr
+  end
   if not ip or ip == "" then return nil end
   return ccanon.canon_ip(ip, self:ipv6_prefix())
 end
