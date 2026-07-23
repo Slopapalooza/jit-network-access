@@ -1,0 +1,89 @@
+# JIT Network Access — M1 harness (Simple profile, NO Redis).
+#
+# Two multisite services behind one BunkerWeb instance:
+#   app-a.local  -> whoami-a   JIT interstitial mode
+#   app-b.local  -> whoami-b   JIT stealth mode
+# A `tester` container on the bw-universe network drives the curl matrix so every
+# request has a stable source IP (which is what a grant is keyed to in Simple
+# mode — no real-IP, the TCP peer).
+#
+# Image tags target BunkerWeb 1.6.x; bump if a newer patch is out.
+
+x-bw-version: &bw "1.6.13"
+
+services:
+  bunkerweb:
+    image: bunkerity/bunkerweb:1.6.13
+    environment:
+      API_WHITELIST_IP: "127.0.0.0/8 10.20.30.0/24"
+    networks:
+      - bw-universe
+      - bw-services
+    restart: unless-stopped
+
+  bw-scheduler:
+    image: bunkerity/bunkerweb-scheduler:1.6.13
+    depends_on:
+      - bunkerweb
+    volumes:
+      - bw-data:/data
+      - ./plugins:/data/plugins            # vendored jitaccess plugin (populated by run.sh)
+    environment:
+      BUNKERWEB_INSTANCES: "bunkerweb"
+      API_WHITELIST_IP: "127.0.0.0/8 10.20.30.0/24"
+      MULTISITE: "yes"
+      SERVER_NAME: "app-a.local app-b.local"
+      USE_REVERSE_PROXY: "yes"
+      # Keep logs quiet-ish and startup fast for a test rig
+      LOG_LEVEL: "notice"
+
+      # --- app-a: JIT interstitial ---
+      app-a.local_REVERSE_PROXY_HOST: "http://whoami-a:80"
+      app-a.local_USE_JIT_ACCESS: "yes"
+      app-a.local_JIT_ACCESS_TOKENS: "*"
+      app-a.local_JIT_ACCESS_FAILURE_MODE: "interstitial"
+      app-a.local_JIT_ACCESS_GRANT_TIME: "120"
+
+      # --- app-b: JIT stealth ---
+      app-b.local_REVERSE_PROXY_HOST: "http://whoami-b:80"
+      app-b.local_USE_JIT_ACCESS: "yes"
+      app-b.local_JIT_ACCESS_TOKENS: "*"
+      app-b.local_JIT_ACCESS_FAILURE_MODE: "stealth"
+      app-b.local_JIT_ACCESS_GRANT_TIME: "120"
+    networks:
+      - bw-universe
+    restart: unless-stopped
+
+  whoami-a:
+    image: traefik/whoami
+    networks:
+      - bw-services
+    restart: unless-stopped
+
+  whoami-b:
+    image: traefik/whoami
+    networks:
+      - bw-services
+    restart: unless-stopped
+
+  tester:
+    image: curlimages/curl:8.11.0
+    entrypoint: ["sleep", "infinity"]
+    depends_on:
+      - bunkerweb
+    networks:
+      - bw-universe
+    restart: unless-stopped
+
+volumes:
+  bw-data:
+
+networks:
+  bw-universe:
+    name: bw-universe
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.20.30.0/24
+  bw-services:
+    name: bw-services
