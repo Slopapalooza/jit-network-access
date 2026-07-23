@@ -72,17 +72,42 @@ end
 -- expired AND (ip+cookie) cookie matches. registry is duck-typed (has :lookup,
 -- :is_expired). Any failure -> nil (deny). This is the function the adapter's
 -- access phase calls.
+--
+-- Break-glass carve-out: a grant created directly by an admin over the
+-- authenticated internal API (rec.manual == true) skips the registry re-check,
+-- since there may be no token/kid behind it. TTL still bounds it, and revoke
+-- still removes it. This is what makes the gate testable and recoverable in M1
+-- before the knock protocol (M2) issues registry-backed grants.
 function methods:is_allowed(sname_canon, ip_canon, registry, now, cookie_hash_present)
   local rec = self:get_grant(sname_canon, ip_canon)
   if not rec then return nil end
-  local token = registry:lookup(rec.kid)
-  if not token then return nil end                 -- kid revoked -> deny
-  if registry:is_expired(token, now) then return nil end
+  if not rec.manual then
+    local token = registry and registry:lookup(rec.kid)
+    if not token then return nil end               -- kid revoked/unknown -> deny
+    if registry:is_expired(token, now) then return nil end
+  end
   if rec.binding == "ip+cookie" then
     -- HARDENED: compare presented opaque grant-id cookie hash to rec.cookie_hash
     if not cookie_hash_present or cookie_hash_present ~= rec.cookie_hash then return nil end
   end
   return rec
+end
+
+-- Build a grant record. `opts` = { kid, binding, cookie_hash, manual, now }.
+function _M.record(sname_canon, ip_canon, kid, ttl, opts)
+  opts = opts or {}
+  local now = opts.now or ngx.time()
+  return {
+    v = 1,
+    kid = kid,
+    service = sname_canon,
+    ip = ip_canon,
+    binding = opts.binding or "ip",
+    cookie_hash = opts.cookie_hash,
+    manual = opts.manual or false,
+    issued = now,
+    exp = now + ttl,
+  }
 end
 
 function methods:del_grant(sname_canon, ip_canon)
