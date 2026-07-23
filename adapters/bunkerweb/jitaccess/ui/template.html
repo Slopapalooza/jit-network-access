@@ -1,0 +1,19 @@
+<div class="col-12">
+  <div class="card p-4 shadow-md rounded-3">
+    <h5 class="mb-1">Create a device token</h5>
+    <p class="text-muted mb-3">Generate a JIT Access token to add to your global config, with a registration URL to hand to the user.</p>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="mb-3">
+        <label class="form-label">Label</label>
+        <input class="form-control" name="label" placeholder="Jamie laptop" maxlength="64" required>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Origin(s) this token may open</label>
+        <input class="form-control" name="origins" placeholder="https://app.example.com, https://wiki.example.com" required>
+        <div class="form-text">Comma-separated https origins. Also set <code>&lt;server&gt;_JIT_ACCESS_TOKENS=&lt;kid&gt;</code> on each.</div>
+      </div>
+      <button class="btn btn-primary" type="submit">Generate token</button>
+    </form>
+  </div>
+</div>

@@ -67,6 +67,24 @@ async function knock(origin) {
 chrome.webNavigation.onBeforeNavigate.addListener(async (d) => {
   if (d.frameId !== 0 || d.parentFrameId !== -1) return;   // top-level main frame ONLY
   if (!isHttps(d.url)) return;
+
+  // Registration URL: <host><PREFIX>/register?code=... — hand the token off to
+  // our confirm page. webNavigation fires for all URLs (no host permission
+  // needed to observe), and we navigate the tab to our own page; the confirm
+  // page then requests permission + exchanges the code on a user click.
+  let u;
+  try { u = new URL(d.url); } catch { return; }
+  if (u.pathname.endsWith(PREFIX + "/register") && u.searchParams.get("code")) {
+    const dest = chrome.runtime.getURL("enroll.html") + "?" + new URLSearchParams({
+      server: u.origin,
+      code: u.searchParams.get("code") || "",
+      origins: u.searchParams.get("origins") || u.origin,
+      label: u.searchParams.get("label") || "",
+    }).toString();
+    chrome.tabs.update(d.tabId, { url: dest });
+    return;
+  }
+
   const origin = originOf(d.url);
   if (!origin) return;
   if (!(await tokenForOrigin(origin))) return;
