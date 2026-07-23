@@ -79,6 +79,15 @@
       "regex": "^[1-9][0-9]{0,3}$",
       "type": "text"
     },
+    "JIT_ACCESS_TRUST_REALIP": {
+      "context": "global",
+      "default": "no",
+      "help": "Hardened: key grants on BunkerWeb's resolved real IP (from USE_REAL_IP / X-Forwarded-For) instead of the TCP peer. Enable ONLY when genuinely behind a trusted proxy with a correctly narrowed REAL_IP_FROM. Default no = key on the un-forgeable TCP peer (immune to X-Forwarded-For / X-Real-IP spoofing).",
+      "id": "jit-access-trust-realip",
+      "label": "Trust resolved real IP (Hardened)",
+      "regex": "^(yes|no)$",
+      "type": "check"
+    },
     "JIT_ACCESS_IPV6_PREFIX": {
       "context": "global",
       "default": "128",
