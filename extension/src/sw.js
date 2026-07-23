@@ -4,10 +4,13 @@
 // user seeing the challenge. Security rules (DESIGN §7 / §11 R6) enforced here:
 //   - auto-knock ONLY on top-level, main-frame navigations (frameId === 0),
 //     never subframes / window.open (confused-deputy fix, SECURITY-REVIEW C5)
-//   - externally_connectable is closed and there are NO external listeners;
-//     internal messages are sender-validated and the worker derives the origin
-//     from the authenticated tab, never from message payload; a proof is NEVER
-//     returned across a message boundary (signing-oracle fix, C6)
+//   - NO external messaging surface: the manifest omits externally_connectable
+//     (so web pages can't connect) and this worker registers ZERO onMessageExternal
+//     / onConnectExternal listeners — so a co-installed extension has nothing to
+//     invoke. Internal messages are sender-validated, the worker derives the
+//     origin from the authenticated tab (never from message payload), and a proof
+//     is NEVER returned across a message boundary (signing-oracle fix, C6).
+//     (Do not add any *External listener — that is what keeps the key locked.)
 //   - exact-origin matching; HTTPS-only
 //   - per-tab attempt cap + single-flight + backoff (no knock storms, H12)
 

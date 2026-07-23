@@ -5,7 +5,6 @@
   "description": "Silently answers the JIT Network Access knock so protected origins open transparently.",
   "permissions": ["storage", "alarms", "webNavigation", "webRequest", "tabs"],
   "optional_host_permissions": ["https://*/*"],
-  "externally_connectable": { "ids": [], "matches": [] },
   "background": { "service_worker": "src/sw.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "JIT Network Access" },
   "options_page": "options.html",
