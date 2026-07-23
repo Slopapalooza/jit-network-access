@@ -76,7 +76,7 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (d) => {
 
 // Recovery: a main-frame response carrying the deny marker -> knock, then reload.
 // Capped per tab so a persistent marker can't cause a reload storm.
-chrome.webRequest.onHeadersReceived.addListener((d) => {
+function onHeaders(d) {
   if (d.type !== "main_frame") return;
   const hasMarker = (d.responseHeaders || []).some((h) => h.name.toLowerCase() === "x-jit-access");
   if (!hasMarker) return;
@@ -92,7 +92,25 @@ chrome.webRequest.onHeadersReceived.addListener((d) => {
     const ok = await knock(origin).catch(() => false);
     if (ok) { attempts.delete(d.tabId); chrome.tabs.reload(d.tabId); }
   });
-}, { urls: ["https://*/*"], types: ["main_frame"] }, ["responseHeaders"]);
+}
+
+// webRequest needs HOST PERMISSION for the URLs it observes. We only hold
+// per-origin (optional) permissions granted at enrollment, so register the
+// listener for exactly those origins — never https://*/* — and re-register when
+// permissions change (enroll / remove token).
+async function refreshWebRequest() {
+  if (chrome.webRequest.onHeadersReceived.hasListener(onHeaders)) {
+    chrome.webRequest.onHeadersReceived.removeListener(onHeaders);
+  }
+  const perms = await chrome.permissions.getAll();
+  const urls = (perms.origins || []).filter((o) => o.startsWith("https://"));
+  if (urls.length) {
+    chrome.webRequest.onHeadersReceived.addListener(onHeaders, { urls, types: ["main_frame"] }, ["responseHeaders"]);
+  }
+}
+refreshWebRequest();
+chrome.permissions.onAdded.addListener(refreshWebRequest);
+chrome.permissions.onRemoved.addListener(refreshWebRequest);
 
 chrome.tabs.onRemoved.addListener((tabId) => attempts.delete(tabId));
 

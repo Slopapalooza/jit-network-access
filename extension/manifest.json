@@ -3,7 +3,7 @@
   "name": "JIT Network Access",
   "version": "0.1.0",
   "description": "Silently answers the JIT Network Access knock so protected origins open transparently.",
-  "permissions": ["storage", "alarms", "webNavigation", "webRequest", "tabs"],
+  "permissions": ["storage", "webNavigation", "webRequest", "tabs"],
   "optional_host_permissions": ["https://*/*"],
   "background": { "service_worker": "src/sw.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "JIT Network Access" },
