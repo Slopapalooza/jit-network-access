@@ -45,7 +45,7 @@ Portability rule: the only engine-specific layer is `adapters/`. The extension s
 Roadmap lives in [`DESIGN.md` §9](DESIGN.md). Current increment:
 
 - [x] **M0** — protocol + core spec + verified conformance vectors + Lua core library
-- [x] **M1** — BunkerWeb plugin gate + local grants (Simple, no Redis); code complete + docker harness ready (run `test/harness/run.sh` on a Docker host to validate)
+- [x] **M1** — BunkerWeb plugin gate + local grants (Simple, no Redis). **Validated end-to-end on a real BunkerWeb 1.6.10 instance** (5/5 matrix: dark-by-default, interstitial marker, grant admits, protocol-endpoint stays dark, revoke re-darkens; `api()` grant/revoke working; no impact on co-hosted services). Docker harness in `test/harness/` for reproducing locally.
 - [ ] **M2** — challenge/knock protocol end-to-end + functional conformance
 - [ ] **M2.5** — security conformance suite
 - [ ] **M3** — extension MVP
