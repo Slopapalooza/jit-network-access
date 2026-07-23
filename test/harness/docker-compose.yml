@@ -16,6 +16,8 @@ services:
     image: bunkerity/bunkerweb:1.6.13
     environment:
       API_WHITELIST_IP: "127.0.0.0/8 10.20.30.0/24"
+    ports:
+      - "8443:8443"          # published so the host can run the knock client
     networks:
       - bw-universe
       - bw-services
@@ -37,19 +39,29 @@ services:
       # Keep logs quiet-ish and startup fast for a test rig
       LOG_LEVEL: "notice"
 
-      # --- app-a: JIT interstitial ---
+      # --- token registry (global, M2) — TEST-ONLY fixed secrets ---
+      # kid_a_test secret = base64url(0x01 * 32); kid_b_test secret = base64url(0x02 * 32)
+      JIT_ACCESS_TOKEN: "kid_a_test:AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE:harness-a"
+      JIT_ACCESS_TOKEN_1: "kid_b_test:AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI:harness-b"
+      JIT_ACCESS_RATELIMIT: "1000r/m"
+
+      # --- app-a: JIT interstitial, only kid_a_test may unlock ---
       app-a.local_REVERSE_PROXY_HOST: "http://whoami-a:80"
       app-a.local_USE_JIT_ACCESS: "yes"
-      app-a.local_JIT_ACCESS_TOKENS: "*"
+      app-a.local_JIT_ACCESS_TOKENS: "kid_a_test"
       app-a.local_JIT_ACCESS_FAILURE_MODE: "interstitial"
       app-a.local_JIT_ACCESS_GRANT_TIME: "120"
+      app-a.local_USE_REVERSE_SCAN: "no"
+      app-a.local_USE_LIMIT_REQ: "no"
 
-      # --- app-b: JIT stealth ---
+      # --- app-b: JIT stealth, only kid_b_test may unlock ---
       app-b.local_REVERSE_PROXY_HOST: "http://whoami-b:80"
       app-b.local_USE_JIT_ACCESS: "yes"
-      app-b.local_JIT_ACCESS_TOKENS: "*"
+      app-b.local_JIT_ACCESS_TOKENS: "kid_b_test"
       app-b.local_JIT_ACCESS_FAILURE_MODE: "stealth"
       app-b.local_JIT_ACCESS_GRANT_TIME: "120"
+      app-b.local_USE_REVERSE_SCAN: "no"
+      app-b.local_USE_LIMIT_REQ: "no"
     networks:
       - bw-universe
     restart: unless-stopped
