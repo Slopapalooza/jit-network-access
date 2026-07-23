@@ -45,7 +45,7 @@ Portability rule: the only engine-specific layer is `adapters/`. The extension s
 Roadmap lives in [`DESIGN.md` §9](DESIGN.md). Current increment:
 
 - [x] **M0** — protocol + core spec + verified conformance vectors + Lua core library
-- [ ] **M1** — BunkerWeb plugin gate + local grants (Simple, no Redis)
+- [x] **M1** — BunkerWeb plugin gate + local grants (Simple, no Redis); code complete + docker harness ready (run `test/harness/run.sh` on a Docker host to validate)
 - [ ] **M2** — challenge/knock protocol end-to-end + functional conformance
 - [ ] **M2.5** — security conformance suite
 - [ ] **M3** — extension MVP
@@ -57,8 +57,8 @@ Roadmap lives in [`DESIGN.md` §9](DESIGN.md). Current increment:
 
 This project is being developed on a host **without Lua or Docker**. Therefore:
 
-- **Verified here:** the conformance vectors are produced by the Python reference implementation (`core/testdata/generate_vectors.py`) and cross-checked with `openssl`. The crypto constructions (PAE, HMAC proof, nonce) are executable and reproducible.
-- **Not yet run here:** the Lua core and the BunkerWeb plugin cannot be executed locally — they are written to match the vectors and are validated by the docker harness (`test/harness/`) on a Docker-capable Linux host. Treat them as reviewed-but-not-yet-executed until the harness is run.
+- **Verified here:** the conformance vectors are produced by the Python reference implementation (`core/testdata/generate_vectors.py`) and cross-checked with `openssl`; the crypto constructions (PAE, canonicalization, HMAC proof, nonce) are additionally reproduced by independent Node ports of the Lua algorithms. Non-Lua artifacts are linted (compose YAML, bash `-n`, plugin.json, the registry job's self-test) and the plugin vendor/packaging step is exercised.
+- **Not yet run here:** the Lua core and the BunkerWeb plugin cannot be executed locally (no Lua/Docker) — they are written to match the vectors and validated by the docker harness (`test/harness/`) on a Docker-capable Linux host. Treat them as reviewed-but-not-yet-executed until the harness is run; if an M1 assertion fails, the likely suspects are BunkerWeb-integration details (the `api()` response envelope, internal-API host/whitelist, plugin ordering), not the crypto core.
 
 ## Status of the concept
 
