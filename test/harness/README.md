@@ -79,3 +79,14 @@ errors, corrupt registry, and enabled-without-grant all fail closed today.
 ```bash
 docker compose down -v
 ```
+
+## Validated on a real BunkerWeb instance (1.6.10, systemd)
+
+M1 was run end-to-end against a live BunkerWeb 1.6.10 (Linux-package) install, installing the plugin via the control API and testing a disposable `jittest.local` vhost. Result: **5/5** — dark-by-default (403), `X-JIT-Access` interstitial marker present, manual grant admits (200), `/.well-known/jit-access/*` stays dark even when granted, revoke re-darkens. The `api()` grant/revoke endpoints worked on the instance internal API, and installing the plugin did not change any co-hosted service's responses.
+
+**Deployment finding — plugin ordering matters.** `jitaccess` runs **last** in BunkerWeb's access phase (order: `ssl, whitelist, …, reversescan, limit, …, antibot, jitaccess`). This is correct for the greylist-semantics default (a grant admits the client *into* the pipeline; the other security plugins still apply). But two consequences to document for operators:
+
+- **`reversescan`** runs before `jitaccess` and denies clients that have well-known ports open. Testing from `localhost` fails at `reversescan` (the host has port 22 open) *before* `jitaccess` is reached — disable it on the test vhost (`USE_REVERSE_SCAN=no`) or test from a client without open ports. This is not a jitaccess issue; it confirms jitaccess sits behind the rest of the chain.
+- **`limit`** (request rate limiter) can return 429 under rapid testing; disable (`USE_LIMIT_REQ=no`) or pace requests when scripting the matrix.
+
+Everything installed for the test (plugin, `jittest.local` service, temp upstream) is removable via the control API (`DELETE /services/{name}`, `DELETE /plugins/jitaccess`), which restores the instance to its prior state.
