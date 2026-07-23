@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 13px system-ui, sans-serif; margin: 0; width: 250px; padding: 12px; }
+    .row { margin: .45rem 0; }
+    .badge { padding: .1rem .45rem; border-radius: 4px; color: #fff; font-size: 12px; }
+    .g { background: #2a8a5a; } .r { background: #b04444; } .n { background: #888; }
+    button { width: 100%; padding: .45rem; margin-top: .4rem; cursor: pointer; }
+    a { font-size: 12px; }
+    .muted { color: #666; }
+  </style>
+</head>
+<body>
+  <div class="row"><b>JIT Network Access</b></div>
+  <div class="row" id="status" class="muted">…</div>
+  <button id="knock" style="display:none">Knock now</button>
+  <div class="row"><a href="#" id="opts">Manage tokens</a></div>
+  <script type="module" src="src/popup.js"></script>
+</body>
+</html>
