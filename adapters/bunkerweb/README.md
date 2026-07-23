@@ -30,14 +30,18 @@ volume, or set `EXTERNAL_PLUGIN_URLS=file:///path/to/jitaccess.tar.gz`.
 
 Access phase (M1/M2), knock protocol + one-time-code `/enroll` (M2/M4), and the
 security suite (M2.5) are implemented and **validated on real BunkerWeb 1.6.10**.
-The plugin embeds the vector-verified core; metrics show on the UI page; token
-generation is in `bwcli jitaccess token`.
+The plugin embeds the vector-verified core; metrics show on the UI page. Tokens can
+be minted from **`bwcli jitaccess token`** or the **UI page** (Plugins → JIT
+Network Access → *Create a device token*), and enrollment can be handed to a user
+as a **registration URL** they simply browse to (see below).
 
 ## Simple-mode quickstart (no Redis, no database, no real-IP tuning)
 
 1. **Install** the plugin (build/install above), and confirm it loaded:
    `journalctl -u bunkerweb-scheduler | grep -i jitaccess`.
-2. **Create a token** (prints the setting line + enrollment options):
+2. **Create a token** — either from the **UI** (Plugins → JIT Network Access →
+   *Create a device token*, which returns the config line + copy-paste enrollment
+   commands) or the CLI:
    ```bash
    bwcli jitaccess token "Jamie laptop"
    ```
@@ -49,17 +53,19 @@ generation is in `bwcli jitaccess token`.
    app.example.com_JIT_ACCESS_TOKENS=<kid>        # or * for any registered token
    ```
    The service is now dark until a valid knock.
-4. **Enroll the browser** — recommended (secret never in the string): mint a
-   one-time code and hand the user a setup string:
+4. **Enroll the browser.** Mint a one-time code (secret never leaves the server);
+   pass `server` to also get a ready-made **registration URL**:
    ```bash
    curl -s -H "Host: bwapi" -H "Authorization: Bearer $API_TOKEN" \
      -X POST http://127.0.0.1:5000/jitaccess/enroll-code \
-     -d '{"kid":"<kid>","origins":["https://app.example.com"]}'
-   # -> {"code":"..."} ; give the user:
-   # jitaccess://enroll?v=1&server=https://app.example.com&code=<code>&origins=https://app.example.com
+     -d '{"kid":"<kid>","origins":["https://app.example.com"],"server":"https://app.example.com"}'
+   # -> {"code":"...","register_url":"https://app.example.com/.well-known/jit-access/register?code=...&origins=..."}
    ```
-   They paste it into the extension's options page (see `../../extension`).
-   Visiting `https://app.example.com` then opens after a silent knock.
+   Hand the user the **`register_url`** — they just browse to it and click **Enroll**
+   on the extension's confirm page (no copy-paste). Alternatively give them the
+   setup string `jitaccess://enroll?v=1&server=…&code=<code>&origins=…` to paste
+   into the extension's options page (see `../../extension`). Either way, visiting
+   `https://app.example.com` then opens after a silent knock.
 
 Hardening (cookie binding, stealth, shared backend, KEK, real-IP trust) is opt-in
 — see `../../DESIGN.md` §1.1 and §11.
@@ -70,7 +76,8 @@ Hardening (cookie binding, stealth, shared backend, KEK, real-IP trust) is opt-i
   `GET /jitaccess/grants`, `POST /jitaccess/revoke {service,ip}`,
   `POST /jitaccess/revoke-token {kid}` (evicts every grant for a lost device),
   `POST /jitaccess/grant {service,ip,ttl}` (break-glass),
-  `POST /jitaccess/enroll-code {kid,origins,ttl}`.
+  `POST /jitaccess/enroll-code {kid,origins,ttl[,server]}` (returns `code`, plus a
+  `register_url` when `server` is given).
 - **Metrics** appear on the plugin's UI page (knocks accepted/rejected, requests
   admitted/denied, enrollments).
 
