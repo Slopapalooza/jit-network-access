@@ -35,6 +35,7 @@ Visit `https://app-a.local:8443` — it should open after a silent knock.
 - **No external messaging surface:** the manifest omits `externally_connectable` (web pages can't connect) and the worker registers **zero** `onMessageExternal`/`onConnectExternal` listeners, so a co-installed extension has nothing to invoke. Internal messages are `sender`-validated, the worker derives the origin from the **authenticated tab URL** (never the message), and a **proof is never returned across a message boundary** (signing-oracle fix). *Do not add any `*External` listener.*
 - **Exact-origin** matching (scheme+host+port); **HTTPS-only**.
 - Per-tab attempt cap + single-flight + backoff (no knock/reload storms).
+- The `webRequest` recovery listener is registered **only for origins you've granted** (never `https://*/*`) and re-registered when you enroll/remove a token — so the extension never asks for all-sites access.
 - Secret is a **non-extractable** key in IndexedDB; config in `storage.local`; grant cache in `storage.session`; **never** `storage.sync`.
 
 ## Note on enrollment
