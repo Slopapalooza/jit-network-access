@@ -2,7 +2,7 @@
   "id": "jitaccess",
   "name": "JIT Access",
   "description": "Keep a service dark until a paired browser extension answers a time-based challenge; a valid knock creates a temporary, self-expiring allow entry. Simple mode needs no external dependencies.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "stream": "no",
   "settings": {
     "USE_JIT_ACCESS": {
@@ -104,6 +104,15 @@
       "id": "jit-access-ratelimit",
       "label": "Knock endpoint rate limit",
       "regex": "^[1-9][0-9]*r/[smhd]$",
+      "type": "text"
+    },
+    "JIT_ACCESS_ENROLL_TTL": {
+      "context": "global",
+      "default": "86400",
+      "help": "Lifetime in seconds of a device enrollment link/code (default 86400 = 24 h, so a user can still enroll the next day). Clamped to 300–604800 (5 min – 7 days). Links survive config reloads; a full nginx restart voids outstanding links.",
+      "id": "jit-access-enroll-ttl",
+      "label": "Enrollment link lifetime (seconds)",
+      "regex": "^[1-9][0-9]{2,5}$",
       "type": "text"
     },
     "JIT_ACCESS_TOKEN": {

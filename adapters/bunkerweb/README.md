@@ -54,12 +54,17 @@ scheduler already reads (via the DB, method `ui`, like the Global Config page).
    enter a label, tick the site(s) it may open, **Create**. This writes the token
    and adds its `kid` to each selected service's allow-list. (It activates on the
    next reload, ~1 min.)
-4. **Enroll the device** — in the token list, click **Enroll device**: you get a
-   **registration URL** (secret never in the link). Hand it to the user; with the
-   extension installed they browse to it, click **Enroll**, and the site then
-   opens after a silent knock. **Regenerate** issues a fresh secret for a replaced
-   device (old one revoked immediately); **Delete** removes the token, strips it
-   from every allow-list, and evicts live grants.
+4. **Enroll the device** — in the token list, click **Enroll device**: the
+   **registration URL** (secret never in the link) appears right on the page with
+   a copy button. Hand it to the user; with the extension installed they browse
+   to it, click **Enroll**, and the site then opens after a silent knock. Links
+   are single-use and live for `JIT_ACCESS_ENROLL_TTL` seconds (default
+   **24 hours**, clamped 5 min–7 days) so a user can still enroll the next day;
+   they survive config reloads (a full nginx restart voids outstanding links).
+   **Regenerate** issues a fresh secret for a replaced device (old one revoked
+   immediately); **Delete** removes the token, strips it from every allow-list,
+   and evicts live grants. All page actions render inline (create/enroll/
+   regenerate/delete) — no separate result pages when JS is available.
 
 CLI/API equivalents (headless): `bwcli jitaccess token`, and
 `POST /jitaccess/enroll-code {kid,origins,server}` on the instance API returns the

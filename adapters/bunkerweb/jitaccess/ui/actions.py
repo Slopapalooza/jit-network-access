@@ -17,6 +17,11 @@
 #
 # Immediate grant eviction (so a deleted/rotated device loses access now, not at
 # TTL) is done via the instance internal API (POST /jitaccess/revoke-token).
+#
+# Responses are dual-mode: template.html submits the forms via fetch() with
+# X-Requested-With, and gets JSON (result + fresh token/service state) rendered
+# inline on the page. Plain form POSTs (no JS / strict CSP) still get the
+# stand-alone HTML result pages.
 
 import base64
 import json
@@ -170,6 +175,44 @@ def _dig(d, key):
     return None
 
 
+# ---- dual-mode (inline JSON vs. fallback HTML page) responses ---------------
+
+def _wants_json(request):
+    return request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+
+def _state_payload(db):
+    """Fresh tokens/services for the client-side re-render; never raises."""
+    try:
+        tokens, services = _read_state(db)
+        return {"tokens": tokens, "services": services}
+    except BaseException as e:
+        getLogger("UI").error(f"jitaccess state read: {e}")
+        return {"tokens": [], "services": [], "error": str(e)}
+
+
+def _json(Response, db, payload, status=200):
+    body = dict(payload)
+    body.setdefault("ok", status < 400)
+    body["state"] = _state_payload(db)
+    return Response(json.dumps(body), mimetype="application/json", status=status)
+
+
+def _ttl_human(seconds):
+    try:
+        s = int(seconds)
+    except (TypeError, ValueError):
+        return None
+    if s % 86400 == 0 and s >= 86400:
+        n = s // 86400
+        return f"{n} day" + ("s" if n != 1 else "")
+    if s % 3600 == 0 and s >= 3600:
+        n = s // 3600
+        return f"{n} hour" + ("s" if n != 1 else "")
+    n = max(1, s // 60)
+    return f"{n} minute" + ("s" if n != 1 else "")
+
+
 # ---- action handlers -------------------------------------------------------
 
 def jitaccess(**kwargs):
@@ -188,8 +231,12 @@ def jitaccess(**kwargs):
             return _enroll(kwargs, db, request, Response)
     except BaseException as e:
         getLogger("UI").error(format_exc())
+        if _wants_json(request):
+            return _json(Response, db, {"ok": False, "message": f"The operation failed: {e}"}, status=500)
         return Response(_page(request, "Error", f'<p class="err">The operation failed: {escape(str(e))}</p>'),
                         mimetype="text/html", status=500)
+    if _wants_json(request):
+        return _json(Response, db, {"ok": False, "message": "Unknown action."}, status=400)
     return Response(_page(request, "Unknown action", "<p>Unknown action.</p>"), mimetype="text/html", status=400)
 
 
@@ -216,13 +263,20 @@ def _create(kwargs, db, request, Response):
 
     _write_tokens(db, entries, service_updates)
 
+    note = ("The token activates on the next config reload (usually under a minute). "
+            "Then use Enroll device to get the registration link to hand to the user.")
+    if _wants_json(request):
+        return _json(Response, db, {
+            "action": "create", "message": f"Token “{label}” created.",
+            "kid": kid, "label": label, "sites": services, "note": note,
+        })
+
     sites = "".join(f"<li><code>{escape(s)}</code></li>" for s in services) or \
         '<li class="muted">none selected — the token opens nothing until you add a site</li>'
     body = (
         f'<p class="ok">&#10003; Token <b>{escape(label)}</b> created.</p>'
         f'<p>kid: <code>{escape(kid)}</code></p><p>Allowed sites:</p><ul>{sites}</ul>'
-        f'<p class="muted">The token activates on the next config reload (usually under a minute). '
-        f'Then use <b>Enroll device</b> in the token list to get the registration link to hand to the user.</p>'
+        f'<p class="muted">{escape(note)}</p>'
     )
     return Response(_page(request, "Token created", body), mimetype="text/html")
 
@@ -230,6 +284,8 @@ def _create(kwargs, db, request, Response):
 def _delete(kwargs, db, request, Response):
     kid = (request.form.get("kid") or "").strip()
     if not kid:
+        if _wants_json(request):
+            return _json(Response, db, {"ok": False, "message": "Missing kid."}, status=400)
         return Response(_page(request, "Delete", '<p class="err">Missing kid.</p>'), mimetype="text/html", status=400)
 
     gcfg = db.get_config(global_only=True, methods=False)
@@ -245,6 +301,11 @@ def _delete(kwargs, db, request, Response):
 
     _write_tokens(db, entries, service_updates or None)
     _instance_post(kwargs, "/jitaccess/revoke-token", {"kid": kid})   # evict live grants now
+    if _wants_json(request):
+        return _json(Response, db, {
+            "action": "delete", "kid": kid,
+            "message": "Token deleted; it was stripped from every site and any active access was revoked.",
+        })
     return _redirect_back(request, Response)
 
 
@@ -260,14 +321,22 @@ def _regenerate(kwargs, db, request, Response):
         else:
             entries.append(e)
     if label is None:
+        if _wants_json(request):
+            return _json(Response, db, {"ok": False, "message": "Token not found."}, status=404)
         return Response(_page(request, "Regenerate", '<p class="err">Token not found.</p>'), mimetype="text/html", status=404)
 
     _write_tokens(db, entries)                                          # kid unchanged -> allow-lists untouched
     _instance_post(kwargs, "/jitaccess/revoke-token", {"kid": kid})     # old device out now
+    note = ("The previous device has been revoked and its old secret no longer works. "
+            "After the next reload, use Enroll device to enroll the replacement.")
+    if _wants_json(request):
+        return _json(Response, db, {
+            "action": "regenerate", "kid": kid, "label": label,
+            "message": f"Token “{label}” regenerated with a new secret.", "note": note,
+        })
     body = (
         f'<p class="ok">&#10003; Token <b>{escape(label)}</b> (<code>{escape(kid)}</code>) regenerated '
-        f'with a new secret.</p><p class="muted">The previous device has been revoked and its old secret '
-        f'no longer works. After the next reload, use <b>Enroll device</b> to enroll the replacement.</p>'
+        f'with a new secret.</p><p class="muted">{escape(note)}</p>'
     )
     return Response(_page(request, "Token regenerated", body), mimetype="text/html")
 
@@ -277,6 +346,8 @@ def _enroll(kwargs, db, request, Response):
     tokens, _services = _read_state(db)
     tok = next((t for t in tokens if t["kid"] == kid), None)
     if not tok:
+        if _wants_json(request):
+            return _json(Response, db, {"ok": False, "message": "Token not found."}, status=404)
         return Response(_page(request, "Enroll", '<p class="err">Token not found.</p>'), mimetype="text/html", status=404)
 
     origins = [f"https://{s}" for s in tok["sites"]]
@@ -285,12 +356,20 @@ def _enroll(kwargs, db, request, Response):
         data["server"] = origins[0]
     ok, resp = _instance_post(kwargs, "/jitaccess/enroll-code", data)
     register_url = _dig(resp, "register_url")
+    ttl = _dig(resp, "ttl")
+    ttl_human = _ttl_human(ttl) or "15 minutes"
 
     if register_url:
+        if _wants_json(request):
+            return _json(Response, db, {
+                "action": "enroll", "kid": kid, "label": tok["label"], "sites": tok["sites"],
+                "register_url": register_url, "ttl": ttl, "ttl_human": ttl_human,
+                "message": f"Registration link for “{tok['label']}” — valid ~{ttl_human}, single use, no secret in the link.",
+            })
         e = escape
         body = (
             f'<p class="ok">&#10003; Registration link for <b>{e(tok["label"])}</b> '
-            f'(<code>{e(kid)}</code>) — valid ~15&nbsp;min, single use, no secret in the link:</p>'
+            f'(<code>{e(kid)}</code>) — valid ~{e(ttl_human)}, single use, no secret in the link:</p>'
             f'<pre>{e(register_url)}</pre>'
             f'<p>Hand it to the user. With the extension installed, they browse to it and click '
             f'<b>Enroll</b>; the browser then opens {e(", ".join(tok["sites"]) or "the site")} after a silent knock.</p>'
@@ -303,6 +382,9 @@ def _enroll(kwargs, db, request, Response):
         hint = ("The instance couldn't mint a link. The most common cause is the token isn't loaded yet — "
                 "wait for the config reload (under a minute after creating it) and try again.")
     msg = _dig(resp, "msg") or _dig(resp, "error") or ""
+    if _wants_json(request):
+        extra = f" Instance said: {msg}" if msg else ""
+        return _json(Response, db, {"ok": False, "action": "enroll", "message": hint + extra}, status=502)
     extra = f'<p class="muted">Instance said: {escape(str(msg))}</p>' if msg else ""
     return Response(_page(request, "Enrollment link", f'<p class="err">{escape(hint)}</p>{extra}'),
                     mimetype="text/html", status=502)

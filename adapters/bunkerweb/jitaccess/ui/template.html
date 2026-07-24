@@ -1,9 +1,14 @@
 {# JIT Access plugin page. Rendered by the UI in a bare Jinja env (see actions.py):
    pre_render is available; csrf_token() rides in via the app jinja globals and is
    required on every POST (Flask-WTF CSRF). `d` is the pre_render payload whether
-   the UI wraps it as {data: ...} or passes it raw. #}
+   the UI wraps it as {data: ...} or passes it raw.
+
+   The forms below work two ways: the inline script intercepts submits, POSTs via
+   fetch (X-Requested-With) and renders the JSON result + refreshed token list in
+   place. Without JS (or under a script-blocking CSP) they fall back to plain form
+   POSTs and the stand-alone result pages actions.py still serves. #}
 {% set d = pre_render.get("data", pre_render) %}
-<div class="col-12">
+<div class="col-12" id="jit-root">
 
   {# ---- metrics ---- #}
   <div class="row g-2 mb-4">
@@ -17,12 +22,15 @@
     {% endfor %}
   </div>
 
+  {# ---- inline action results land here ---- #}
+  <div id="jit-flash"></div>
+
   {# ---- create a token ---- #}
   <div class="card p-4 shadow-md rounded-3 mb-4">
     <h5 class="mb-1">Create a device token</h5>
     <p class="text-muted mb-3">Generate a JIT Access token and choose which of your JIT-enabled sites it may open.</p>
     {% if d.services %}
-    <form method="post">
+    <form method="post" id="jit-create-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="action" value="create">
       <div class="mb-3">
@@ -57,11 +65,10 @@
     {% if d.load_error %}
     <div class="alert alert-danger">Could not load tokens: {{ d.load_error }}</div>
     {% endif %}
-    {% if d.tokens %}
-    <div class="table-responsive">
+    <div class="table-responsive" id="jit-table-wrap" {% if not d.tokens %}style="display:none"{% endif %}>
       <table class="table align-middle">
         <thead><tr><th>Label</th><th>kid</th><th>Sites it opens</th><th>Expires</th><th class="text-end">Actions</th></tr></thead>
-        <tbody>
+        <tbody id="jit-token-rows">
         {% for t in d.tokens %}
         <tr>
           <td>{{ t.label }}</td>
@@ -77,13 +84,13 @@
               <input type="hidden" name="kid" value="{{ t.kid }}">
               <button class="btn btn-sm btn-outline-primary" type="submit" title="Get a registration link for a device">Enroll device</button>
             </form>
-            <form method="post" class="d-inline" onsubmit="return confirm('Regenerate {{ t.label }}? The current device stops working until you re-enroll it with the new secret.');">
+            <form method="post" class="d-inline" data-confirm="Regenerate {{ t.label }}? The current device stops working until you re-enroll it with the new secret.">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="action" value="regenerate">
               <input type="hidden" name="kid" value="{{ t.kid }}">
               <button class="btn btn-sm btn-outline-secondary" type="submit" title="New secret, same kid (device replaced)">Regenerate</button>
             </form>
-            <form method="post" class="d-inline" onsubmit="return confirm('Delete {{ t.label }}? This permanently removes the token, strips it from every site, and revokes any active access.');">
+            <form method="post" class="d-inline" data-confirm="Delete {{ t.label }}? This permanently removes the token, strips it from every site, and revokes any active access.">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="action" value="delete">
               <input type="hidden" name="kid" value="{{ t.kid }}">
@@ -95,9 +102,162 @@
         </tbody>
       </table>
     </div>
-    {% else %}
-    <p class="text-muted mb-0">No tokens yet. Create one above.</p>
-    {% endif %}
+    <p class="text-muted mb-0" id="jit-empty" {% if d.tokens %}style="display:none"{% endif %}>No tokens yet. Create one above.</p>
   </div>
 
+<script>
+(function () {
+  "use strict";
+  var root = document.getElementById("jit-root");
+  if (!root || !window.fetch) return;
+  var flash = document.getElementById("jit-flash");
+  var csrfInput = root.querySelector('input[name="csrf_token"]');
+  var CSRF = csrfInput ? csrfInput.value : "";
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined && text !== null) n.textContent = text;
+    return n;
+  }
+
+  function hidden(name, value) {
+    var i = document.createElement("input");
+    i.type = "hidden"; i.name = name; i.value = value;
+    return i;
+  }
+
+  function renderFlash(p) {
+    flash.textContent = "";
+    var box = el("div", "card p-4 shadow-md rounded-3 mb-4 border " + (p.ok ? "border-success" : "border-danger"));
+    box.appendChild(el("h6", p.ok ? "text-success mb-2" : "text-danger mb-2",
+                       (p.ok ? "✓ " : "✗ ") + (p.message || (p.ok ? "Done." : "The operation failed."))));
+    if (p.action === "create" && p.ok) {
+      var line = el("p", "mb-1");
+      line.appendChild(document.createTextNode("kid: "));
+      line.appendChild(el("code", null, p.kid));
+      box.appendChild(line);
+      var sit = el("p", "mb-1");
+      sit.appendChild(document.createTextNode("Sites: "));
+      if (p.sites && p.sites.length) {
+        p.sites.forEach(function (s) { sit.appendChild(el("span", "badge bg-label-primary me-1", s)); });
+      } else {
+        sit.appendChild(el("span", "text-muted", "none selected — the token opens nothing until you add a site"));
+      }
+      box.appendChild(sit);
+    }
+    if (p.action === "enroll" && p.ok && p.register_url) {
+      var pre = el("pre", "p-2 rounded bg-light border overflow-auto mb-2", p.register_url);
+      pre.style.whiteSpace = "pre-wrap";
+      pre.style.wordBreak = "break-all";
+      box.appendChild(pre);
+      var btn = el("button", "btn btn-sm btn-outline-primary", "Copy link");
+      btn.type = "button";
+      btn.addEventListener("click", function () {
+        var done = function () { btn.textContent = "Copied ✓"; setTimeout(function () { btn.textContent = "Copy link"; }, 2000); };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(p.register_url).then(done, function () { fallbackCopy(pre); done(); });
+        } else { fallbackCopy(pre); done(); }
+      });
+      box.appendChild(btn);
+      box.appendChild(el("p", "text-muted mt-2 mb-0",
+        "Hand it to the user. With the extension installed, they browse to it and click Enroll; " +
+        "the browser then opens " + ((p.sites && p.sites.join(", ")) || "the site") + " after a silent knock."));
+    }
+    if (p.note) box.appendChild(el("p", "text-muted mt-2 mb-0", p.note));
+    flash.appendChild(box);
+    box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  function fallbackCopy(node) {
+    var r = document.createRange();
+    r.selectNodeContents(node);
+    var sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(r);
+    try { document.execCommand("copy"); } catch (e) {}
+    sel.removeAllRanges();
+  }
+
+  function actionForm(action, kid, cls, label, title, confirmMsg) {
+    var f = document.createElement("form");
+    f.method = "post"; f.className = "d-inline";
+    if (confirmMsg) f.setAttribute("data-confirm", confirmMsg);
+    f.appendChild(hidden("csrf_token", CSRF));
+    f.appendChild(hidden("action", action));
+    f.appendChild(hidden("kid", kid));
+    var b = el("button", "btn btn-sm " + cls, label);
+    b.type = "submit"; b.title = title;
+    f.appendChild(b);
+    return f;
+  }
+
+  function renderRows(state) {
+    var tbody = document.getElementById("jit-token-rows");
+    var wrap = document.getElementById("jit-table-wrap");
+    var empty = document.getElementById("jit-empty");
+    if (!tbody || !state || !state.tokens) return;
+    tbody.textContent = "";
+    state.tokens.forEach(function (t) {
+      var tr = document.createElement("tr");
+      tr.appendChild(el("td", null, t.label));
+      var kidTd = document.createElement("td");
+      kidTd.appendChild(el("code", null, t.kid));
+      tr.appendChild(kidTd);
+      var sitesTd = document.createElement("td");
+      if (t.sites && t.sites.length) {
+        t.sites.forEach(function (s) {
+          var badge = el("span", "badge bg-label-primary me-1");
+          badge.appendChild(el("code", null, s));
+          sitesTd.appendChild(badge);
+        });
+      } else {
+        sitesTd.appendChild(el("span", "text-muted", "none"));
+      }
+      tr.appendChild(sitesTd);
+      tr.appendChild(el("td", null, t.expiry || "—"));
+      var act = el("td", "text-end text-nowrap");
+      act.appendChild(actionForm("enroll", t.kid, "btn-outline-primary", "Enroll device", "Get a registration link for a device"));
+      act.appendChild(document.createTextNode(" "));
+      act.appendChild(actionForm("regenerate", t.kid, "btn-outline-secondary", "Regenerate", "New secret, same kid (device replaced)",
+        "Regenerate " + t.label + "? The current device stops working until you re-enroll it with the new secret."));
+      act.appendChild(document.createTextNode(" "));
+      act.appendChild(actionForm("delete", t.kid, "btn-outline-danger", "Delete", "Remove this token",
+        "Delete " + t.label + "? This permanently removes the token, strips it from every site, and revokes any active access."));
+      tr.appendChild(act);
+      tbody.appendChild(tr);
+    });
+    if (wrap) wrap.style.display = state.tokens.length ? "" : "none";
+    if (empty) empty.style.display = state.tokens.length ? "none" : "";
+  }
+
+  root.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (!(form instanceof HTMLFormElement) || !root.contains(form)) return;
+    if (e.defaultPrevented) return;
+    var confirmMsg = form.getAttribute("data-confirm");
+    if (confirmMsg && !window.confirm(confirmMsg)) { e.preventDefault(); return; }
+    e.preventDefault();
+    var btns = form.querySelectorAll('button[type="submit"]');
+    btns.forEach(function (b) { b.disabled = true; });
+    fetch(window.location.pathname, {
+      method: "POST",
+      body: new URLSearchParams(new FormData(form)),
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+      credentials: "same-origin",
+    }).then(function (res) {
+      return res.json().catch(function () {
+        throw new Error(res.ok ? "Unexpected response." : "Request failed (HTTP " + res.status + "). Refresh the page and try again.");
+      });
+    }).then(function (p) {
+      renderFlash(p);
+      if (p.state) renderRows(p.state);
+      if (p.ok && form.id === "jit-create-form") form.reset();
+    }).catch(function (err) {
+      renderFlash({ ok: false, message: String(err.message || err) });
+    }).finally(function () {
+      btns.forEach(function (b) { b.disabled = false; });
+    });
+  });
+})();
+</script>
 </div>
