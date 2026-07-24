@@ -29,5 +29,12 @@ Thumbs.db
 
 # Local secrets / test data that should never be committed
 *.key
+*.pem
 *.local.json
 bw-data/
+
+# Internal-only docs — real infrastructure details / adversarial findings,
+# kept out of this public repo (also purged from history).
+SECURITY-REVIEW.md
+docs/enrollment-debug-2026-07-24.md
+docs/*-debug-*.md
