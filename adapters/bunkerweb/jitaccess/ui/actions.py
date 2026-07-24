@@ -399,7 +399,7 @@ def _page(request, title, body_html):
         f'<!doctype html><html><head><meta charset="utf-8"><title>JIT Access — {e(title)}</title>'
         '<style>body{font:14px system-ui;margin:2rem;max-width:860px}code,pre{background:#f4f4f4;border-radius:4px}'
         'pre{padding:.8rem;overflow:auto;white-space:pre-wrap;word-break:break-all}'
-        '.ok{color:#0a7d33}.err{color:#b00020}.muted{color:#666}ul{margin:.3rem 0}'
+        '.ok{color:#2eac68}.err{color:#b00020}.muted{color:#666}ul{margin:.3rem 0}'
         'a.btn{display:inline-block;margin-top:1.2rem;text-decoration:none}</style></head><body>'
         f'<h1>{e(title)}</h1>{body_html}'
         f'<p><a class="btn" href="{back}">&larr; Back to JIT Access</a></p></body></html>'
