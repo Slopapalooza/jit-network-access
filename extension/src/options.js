@@ -2,28 +2,58 @@ import { listTokens, removeToken } from "./store.js";
 import { parseParams, enrollToken } from "./enroll_core.js";
 
 const $ = (id) => document.getElementById(id);
-function msg(text, cls) { const el = $("msg"); el.textContent = text; el.className = cls || "muted"; }
+const msg = (text, cls) => { const el = $("msg"); el.textContent = text || ""; el.className = cls || "muted"; };
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+function hostOf(origin) {
+  try { return new URL(origin).hostname; } catch { return origin; }
+}
+
+function tokenName(t) {
+  return t.label || (t.origins && t.origins.length ? hostOf(t.origins[0]) : "(unnamed)");
+}
 
 async function render() {
-  const tokens = await listTokens();
   const box = $("tokens");
-  box.innerHTML = "";
-  if (!tokens.length) { box.innerHTML = '<p class="muted">No tokens enrolled yet.</p>'; return; }
+  box.textContent = "";
+  let tokens = [];
+  try { tokens = await listTokens(); } catch { /* not running as an extension page */ }
+  if (!tokens.length) {
+    box.appendChild(el("p", "muted",
+      "No devices enrolled yet. Open a registration link from your admin, or paste a setup string above."));
+    return;
+  }
   for (const t of tokens) {
-    const div = document.createElement("div");
-    div.className = "tok";
-    const meta = document.createElement("div");
-    meta.innerHTML = `<b>${t.label || "(unnamed)"}</b> — <code>${t.kid}</code><br>` +
-      `<span class="muted">${t.origins.join(", ")}</span>`;
-    const btn = document.createElement("button");
-    btn.textContent = "Remove";
-    btn.onclick = async () => { await removeToken(t.kid); render(); };
-    div.append(meta, btn);
-    box.appendChild(div);
+    const row = el("div", "tok");
+    const meta = el("div");
+    const line = el("div");
+    line.appendChild(el("span", "name", tokenName(t)));
+    line.appendChild(el("code", "kid", t.kid));
+    meta.appendChild(line);
+    const badges = el("div", "badges");
+    for (const o of t.origins || []) badges.appendChild(el("span", "badge", hostOf(o)));
+    meta.appendChild(badges);
+    const btn = el("button", "btn-danger", "Remove");
+    btn.addEventListener("click", async () => {
+      if (!confirm(`Remove “${tokenName(t)}”? This browser loses access to its sites until it is re-enrolled.`)) return;
+      await removeToken(t.kid);
+      render();
+    });
+    row.append(meta, btn);
+    box.appendChild(row);
   }
 }
 
 async function onEnroll() {
+  const btn = $("enroll");
+  btn.disabled = true;
+  msg("Enrolling…");
   try {
     const { kid } = await enrollToken(parseParams($("setup").value));
     $("setup").value = "";
@@ -31,8 +61,19 @@ async function onEnroll() {
     render();
   } catch (e) {
     msg(e.message, "err");
+  } finally {
+    btn.disabled = false;
   }
 }
 
 $("enroll").addEventListener("click", onEnroll);
+$("setup").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onEnroll(); }
+});
+
+try {
+  $("version").textContent = "v" + chrome.runtime.getManifest().version;
+  $("version").style.display = "inline-block";
+} catch { /* non-extension preview */ }
+
 render();

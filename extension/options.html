@@ -2,33 +2,100 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>JIT Network Access — Enrollment</title>
+  <title>JIT Network Access — Devices</title>
   <style>
-    body { font: 14px system-ui, sans-serif; margin: 2rem; max-width: 660px; }
-    h2 { margin-top: 1.6rem; }
-    textarea { width: 100%; height: 5rem; font-family: monospace; }
-    .tok { border: 1px solid #ccc; padding: .6rem .8rem; margin: .5rem 0; border-radius: 6px; }
-    .muted { color: #666; }
-    code { background: #f4f4f4; padding: 0 .2rem; border-radius: 3px; }
-    button { cursor: pointer; }
-    #msg.err { color: #a33; }
-    #msg.ok { color: #2a8; }
+    :root {
+      --brand: #2eac68; --brand-dark: #26935a;
+      --text: #24313f; --muted: #67727e;
+      --border: #e2e7ec; --bg: #f4f6f8; --card: #ffffff;
+      --danger: #b04444;
+    }
+    * { box-sizing: border-box; }
+    body { font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text);
+           background: var(--bg); margin: 0; padding: 2rem 1rem 3rem; }
+    .wrap { max-width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
+    header { display: flex; align-items: center; gap: .6rem; }
+    header h1 { font-size: 1.35rem; margin: 0; letter-spacing: .2px; }
+    .logo { width: 14px; height: 14px; border-radius: 4px; background: var(--brand); flex: none; }
+    #version { font-size: .75rem; color: var(--muted); border: 1px solid var(--border);
+               border-radius: 999px; padding: .05rem .5rem; display: none; }
+    .tagline { color: var(--muted); margin: -.4rem 0 .2rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+            padding: 1.1rem 1.25rem; box-shadow: 0 1px 2px rgba(16, 24, 40, .04); }
+    .hint { border-left: 4px solid var(--brand); background: #f2faf6; }
+    .hint b { color: var(--brand-dark); }
+    h2 { font-size: 1.02rem; margin: 0 0 .35rem; }
+    .sub { color: var(--muted); margin: 0 0 .8rem; }
+    label { display: block; font-weight: 600; margin-bottom: .35rem; }
+    textarea { width: 100%; height: 4.6rem; font: 12px/1.5 ui-monospace, Consolas, monospace;
+               border: 1px solid var(--border); border-radius: 8px; padding: .6rem .7rem;
+               resize: vertical; color: var(--text); }
+    textarea:focus { outline: 2px solid var(--brand); outline-offset: 0; border-color: transparent; }
+    .row { display: flex; align-items: center; gap: .8rem; margin-top: .7rem; flex-wrap: wrap; }
+    button { cursor: pointer; font: inherit; border-radius: 8px; padding: .45rem 1.1rem; border: 1px solid transparent; }
+    .btn-primary { background: var(--brand); color: #fff; font-weight: 600; }
+    .btn-primary:hover { background: var(--brand-dark); }
+    .btn-primary:disabled { opacity: .6; cursor: default; }
+    .btn-danger { background: #fff; color: var(--danger); border-color: #e7cfcf; padding: .3rem .8rem; }
+    .btn-danger:hover { background: #fbf3f3; }
+    #msg { min-height: 1.2em; }
+    #msg.err { color: var(--danger); }
+    #msg.ok { color: var(--brand-dark); font-weight: 600; }
+    .muted { color: var(--muted); }
+    details { margin-top: .9rem; }
+    summary { cursor: pointer; color: var(--muted); font-size: .85rem; }
+    code { background: #f2f4f6; border: 1px solid var(--border); padding: .1rem .35rem; border-radius: 5px;
+           font: 12px ui-monospace, Consolas, monospace; word-break: break-all; }
+    .tok { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+           border: 1px solid var(--border); border-radius: 8px; padding: .7rem .9rem; margin-top: .6rem; }
+    .tok .name { font-weight: 600; }
+    .tok .kid { margin-left: .45rem; }
+    .badges { margin-top: .35rem; display: flex; flex-wrap: wrap; gap: .3rem; }
+    .badge { background: var(--brand); color: #fff; border-radius: 6px; padding: .12rem .5rem; font-size: .78rem; }
+    footer { color: var(--muted); font-size: .8rem; text-align: center; }
   </style>
 </head>
 <body>
-  <h1>JIT Network Access</h1>
-  <h2>Enroll a device token</h2>
-  <p class="muted">Paste the setup string from your admin. Recommended (one-time code — the secret is fetched over TLS, never in the string):<br>
-    <code>jitaccess://enroll?v=1&amp;server=https://app.example.com&amp;code=&lt;one-time-code&gt;&amp;origins=https://app.example.com&amp;label=&lt;name&gt;</code><br>
-    <span style="font-size:12px">Also accepted (direct import, prototype): <code>…&amp;kid=&lt;kid&gt;&amp;secret=&lt;b64url&gt;&amp;origins=…</code></span>
-  </p>
-  <textarea id="setup" placeholder="jitaccess://enroll?v=1&kid=...&secret=...&origins=https://app.example.com"></textarea>
-  <p><button id="enroll">Enroll</button> <span id="msg" class="muted"></span></p>
-  <p class="muted">Enrolling asks for permission to the listed origins so the extension can knock there. The secret is imported as a non-extractable key and the pasted text should be treated as burned afterward.</p>
+  <div class="wrap">
+    <header>
+      <span class="logo"></span>
+      <h1>JIT Network Access</h1>
+      <span id="version"></span>
+    </header>
+    <p class="tagline">Protected sites stay dark until this browser answers the knock. Manage this browser's enrolled devices here.</p>
 
-  <h2>Enrolled tokens</h2>
-  <div id="tokens"></div>
+    <div class="card hint">
+      <b>Fastest way to enroll:</b> open the registration link your admin sent you and click
+      <b>Enroll this device</b> — nothing to copy. Use the form below only if you were handed
+      a setup string instead.
+    </div>
 
+    <div class="card">
+      <h2>Manual enrollment</h2>
+      <label for="setup">Setup string from your admin</label>
+      <textarea id="setup" placeholder="jitaccess://enroll?v=1&server=https://…&code=…"></textarea>
+      <div class="row">
+        <button id="enroll" class="btn-primary">Enroll device</button>
+        <span id="msg" class="muted"></span>
+      </div>
+      <p class="muted" style="margin-bottom:0">Enrolling asks for permission to the listed sites so the extension can knock there.
+        The secret is stored as a non-extractable key — treat the pasted string as burned afterward.</p>
+      <details>
+        <summary>Setup string formats</summary>
+        <p class="muted" style="margin:.4rem 0 0">Recommended (one-time code — the secret is fetched over TLS, never in the string):<br>
+          <code>jitaccess://enroll?v=1&amp;server=https://app.example.com&amp;code=&lt;one-time-code&gt;&amp;origins=https://app.example.com&amp;label=&lt;name&gt;</code><br>
+          Also accepted (direct import): <code>…&amp;kid=&lt;kid&gt;&amp;secret=&lt;b64url&gt;&amp;origins=…</code></p>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2>Enrolled devices</h2>
+      <p class="sub" style="margin-bottom:0">Each entry is one token this browser can knock with. Secrets are never shown.</p>
+      <div id="tokens"></div>
+    </div>
+
+    <footer>Keys never leave this browser — stored non-extractable, never synced.</footer>
+  </div>
   <script type="module" src="src/options.js"></script>
 </body>
 </html>
