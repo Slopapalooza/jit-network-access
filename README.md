@@ -8,7 +8,6 @@ Make self-hosted services **dark by default**. A service behind a supported edge
 
 **Reference:**
 - **Design:** [`DESIGN.md`](DESIGN.md)
-- **Adversarial security review:** [`SECURITY-REVIEW.md`](SECURITY-REVIEW.md)
 - **Wire protocol (normative):** [`docs/PROTOCOL.md`](docs/PROTOCOL.md)
 - **Portable core contract:** [`core/SPEC.md`](core/SPEC.md)
 

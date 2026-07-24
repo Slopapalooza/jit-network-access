@@ -3,7 +3,7 @@
 **Status:** Draft v1.2 — 2026-07-23 · hardened after adversarial review · two deployment profiles (Simple = zero external deps, Hardened = opt-in)
 **Targets:** Engine-agnostic protocol + portable core · **BunkerWeb 1.6.x** as the flagship enforcement adapter (verified against v1.6.13 source) · Chromium **Manifest V3** extension
 
-> ⚠️ **Security gate — read [`SECURITY-REVIEW.md`](SECURITY-REVIEW.md) before building.** A six-lens adversarial review found ~10 Critical issues, several exploitable as designed, whose through-line is that the system as originally drafted **fails open more often than closed**. The blocking fixes are consolidated in **§11** and folded into the sections below (look for **[SEC]** markers). Do not start M1 until §11's gate items are reflected in the spec.
+> ⚠️ **Security gate — consult the project's internal adversarial security review before building.** A six-lens adversarial review found ~10 Critical issues, several exploitable as designed, whose through-line is that the system as originally drafted **fails open more often than closed**. The blocking fixes are consolidated in **§11** and folded into the sections below (look for **[SEC]** markers). Do not start M1 until §11's gate items are reflected in the spec.
 
 ---
 
@@ -399,7 +399,7 @@ Host permissions are requested **per enrolled origin** via `chrome.permissions.r
 
 ## 8. Security analysis (summary)
 
-Full adversarial analysis and findings ledger: [`SECURITY-REVIEW.md`](SECURITY-REVIEW.md). This table reflects the **hardened** design (§11), not the original draft.
+Full adversarial analysis and findings ledger: maintained internally (not published in this repo). This table reflects the **hardened** design (§11), not the original draft.
 
 | Threat | Mitigation (hardened) |
 |---|---|
@@ -464,7 +464,7 @@ Redis (shared-backend) GrantStore with signed values + AUTH/ACL/TLS; the **proxy
 
 ## 11. Security hardening requirements (blocking — must be in the spec before M1)
 
-Distilled from [`SECURITY-REVIEW.md`](SECURITY-REVIEW.md). Six root causes. **Each is tagged [BASELINE] (always on, both profiles, no external dependency) or [HARDENED] (opt-in, or only relevant once a shared backend / real-IP / harsher threat model is introduced — §1.1).** The baseline items are what make even a zero-dependency home setup sound; the hardened items are the deeper lockdown for advanced users.
+Distilled from the internal adversarial security review. Six root causes. **Each is tagged [BASELINE] (always on, both profiles, no external dependency) or [HARDENED] (opt-in, or only relevant once a shared backend / real-IP / harsher threat model is introduced — §1.1).** The baseline items are what make even a zero-dependency home setup sound; the hardened items are the deeper lockdown for advanced users.
 
 **R1 — Fail CLOSED everywhere. [BASELINE]** BunkerWeb's access chain fails *open* on a plugin error (verified). Wrap the whole `access()` body in the plugin's own `pcall` → explicit deny on any error; promote `is_jit_allowed` to a conf-layer default-deny gate independent of the Lua; fail closed on any store error; harness tests for corrupt-registry / deleted-plugin / malformed-input → must deny. **[HARDENED]** the network invariant "origin accepts traffic only from its JIT adapter" with default-deny recipe scaffolds (matters most for multi-path/multi-node topologies).
 

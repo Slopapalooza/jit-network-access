@@ -29,5 +29,10 @@ Thumbs.db
 
 # Local secrets / test data that should never be committed
 *.key
+*.pem
 *.local.json
 bw-data/
+
+# Local-only working docs (not published)
+SECURITY-REVIEW.md
+docs/*-debug-*.md
