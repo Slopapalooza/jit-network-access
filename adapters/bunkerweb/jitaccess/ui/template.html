@@ -46,13 +46,14 @@
         <div class="form-text">Letters, numbers, spaces, <code>. _ -</code> only.</div>
       </div>
       <div class="mb-3">
-        <label class="form-label">Sites this token may open</label>
+        <label class="form-label">Sites this token may open <span class="text-danger">*</span></label>
         {% for s in d.services %}
         <div class="form-check">
           <input class="form-check-input" type="checkbox" name="services" value="{{ s }}" id="jit_svc_{{ loop.index }}">
           <label class="form-check-label" for="jit_svc_{{ loop.index }}"><code>{{ s }}</code></label>
         </div>
         {% endfor %}
+        <div class="form-text">Required — pick every site this device should open. The list can't be changed after creation.</div>
       </div>
       <button class="btn btn-primary" type="submit">Create token</button>
     </form>
@@ -149,12 +150,16 @@
       box.appendChild(line);
       var sit = el("p", "mb-1");
       sit.appendChild(document.createTextNode("Sites: "));
-      if (p.sites && p.sites.length) {
-        p.sites.forEach(function (s) { sit.appendChild(el("span", "badge jit-badge me-1", s)); });
-      } else {
-        sit.appendChild(el("span", "text-muted", "none selected — the token opens nothing until you add a site"));
-      }
+      (p.sites || []).forEach(function (s) { sit.appendChild(el("span", "badge jit-badge me-1", s)); });
       box.appendChild(sit);
+      var eb = el("button", "btn btn-sm btn-outline-primary mt-1", "Get enrollment link");
+      eb.type = "button";
+      eb.addEventListener("click", function () {
+        eb.disabled = true;
+        send(new URLSearchParams({ csrf_token: CSRF, action: "enroll", kid: p.kid }))
+          .then(function () { eb.disabled = false; });
+      });
+      box.appendChild(eb);
     }
     if (p.action === "enroll" && p.ok && p.register_url) {
       var row = el("div", "d-flex align-items-center gap-2 mb-2");
@@ -239,18 +244,10 @@
     if (empty) empty.style.display = state.tokens.length ? "none" : "";
   }
 
-  root.addEventListener("submit", function (e) {
-    var form = e.target;
-    if (!(form instanceof HTMLFormElement) || !root.contains(form)) return;
-    if (e.defaultPrevented) return;
-    var confirmMsg = form.getAttribute("data-confirm");
-    if (confirmMsg && !window.confirm(confirmMsg)) { e.preventDefault(); return; }
-    e.preventDefault();
-    var btns = form.querySelectorAll('button[type="submit"]');
-    btns.forEach(function (b) { b.disabled = true; });
-    fetch(window.location.pathname, {
+  function send(body, formToReset) {
+    return fetch(window.location.pathname, {
       method: "POST",
-      body: new URLSearchParams(new FormData(form)),
+      body: body,
       headers: { "X-Requested-With": "XMLHttpRequest" },
       credentials: "same-origin",
     }).then(function (res) {
@@ -260,12 +257,29 @@
     }).then(function (p) {
       renderFlash(p);
       if (p.state) renderRows(p.state);
-      if (p.ok && form.id === "jit-create-form") form.reset();
+      if (p.ok && formToReset) formToReset.reset();
+      return p;
     }).catch(function (err) {
       renderFlash({ ok: false, message: String(err.message || err) });
-    }).finally(function () {
-      btns.forEach(function (b) { b.disabled = false; });
     });
+  }
+
+  root.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (!(form instanceof HTMLFormElement) || !root.contains(form)) return;
+    if (e.defaultPrevented) return;
+    var confirmMsg = form.getAttribute("data-confirm");
+    if (confirmMsg && !window.confirm(confirmMsg)) { e.preventDefault(); return; }
+    e.preventDefault();
+    var fd = new FormData(form);
+    if (form.id === "jit-create-form" && !fd.getAll("services").length) {
+      renderFlash({ ok: false, message: "Select at least one site — a token can't be edited after creation, so it would open nothing, forever." });
+      return;
+    }
+    var btns = form.querySelectorAll('button[type="submit"]');
+    btns.forEach(function (b) { b.disabled = true; });
+    send(new URLSearchParams(fd), form.id === "jit-create-form" ? form : null)
+      .then(function () { btns.forEach(function (b) { b.disabled = false; }); });
   });
 })();
 </script>
