@@ -5,8 +5,8 @@
   <title>JIT Network Access — Enroll device</title>
   <!-- enroll.html is web_accessible so the service worker can redirect a tab to it.
        Framing is refused by the manifest CSP (frame-ancestors 'none') and by a
-       guard at the top of src/enroll_page.js — an inline <script> here would be
-       silently blocked by the MV3 extension-page CSP. -->
+       guard at the top of src/enroll_page.js. Page logic must live in that module,
+       not inline: the MV3 extension-page CSP blocks inline page scripts. -->
   <style>
     body { font: 15px system-ui, sans-serif; margin: 3rem auto; max-width: 460px; padding: 0 1rem; }
     h1 { font-size: 1.3rem; }
