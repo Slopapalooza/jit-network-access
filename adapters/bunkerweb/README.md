@@ -51,9 +51,10 @@ scheduler already reads (via the DB, method `ui`, like the Global Config page).
    Access** (`<server>_USE_JIT_ACCESS=yes`). The service goes dark until a valid
    knock, and the **JIT Access** plugin page now appears.
 3. **Create + wire a token** — Plugins → **JIT Access** → *Create a device token*:
-   enter a label, tick the site(s) it may open, **Create**. This writes the token
-   and adds its `kid` to each selected service's allow-list. (It activates on the
-   next reload, ~1 min.)
+   enter a label, tick the site(s) it may open (at least one is required — tokens
+   can't be edited after creation), **Create**. This writes the token and adds its
+   `kid` to each selected service's allow-list. (It activates on the next reload,
+   ~1 min.)
 4. **Enroll the device** — in the token list, click **Enroll device**: the
    **registration URL** (secret never in the link) appears right on the page with
    a copy button. Hand it to the user; with the extension installed they browse

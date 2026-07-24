@@ -243,6 +243,20 @@ def jitaccess(**kwargs):
 def _create(kwargs, db, request, Response):
     label = _clean_label(request.form.get("label"))
     services = [s.strip() for s in request.form.getlist("services") if s.strip()]
+
+    # A token can't be edited after creation, so one with no sites is permanently
+    # useless — require at least one KNOWN service (unknown names are dropped).
+    fcfg = db.get_config(methods=False, filtered_settings=["JIT_ACCESS_TOKENS"])
+    known = set((fcfg.get("SERVER_NAME") or "").split())
+    services = [s for s in services if s in known]
+    if not services:
+        err = ("Select at least one site — a token can't be edited after creation, "
+               "so it would open nothing, forever.")
+        if _wants_json(request):
+            return _json(Response, db, {"ok": False, "action": "create", "message": err}, status=400)
+        return Response(_page(request, "Create token", f'<p class="err">{escape(err)}</p>'),
+                        mimetype="text/html", status=400)
+
     kid = "kid_" + _b64u(os.urandom(9))
     secret = _b64u(os.urandom(32))
 
@@ -250,16 +264,13 @@ def _create(kwargs, db, request, Response):
     entries = [e for _k, e in _token_entries(gcfg)]
     entries.append(f"{kid}:{secret}:{label}")
 
-    service_updates = None
-    if services:
-        fcfg = db.get_config(methods=False, filtered_settings=["JIT_ACCESS_TOKENS"])
-        g_tok = fcfg.get("JIT_ACCESS_TOKENS", "")
-        service_updates = {}
-        for s in services:
-            cur = (fcfg.get(f"{s}_JIT_ACCESS_TOKENS", g_tok) or "").split()
-            if "*" not in cur and kid not in cur:
-                cur.append(kid)
-            service_updates[s] = " ".join(cur)
+    g_tok = fcfg.get("JIT_ACCESS_TOKENS", "")
+    service_updates = {}
+    for s in services:
+        cur = (fcfg.get(f"{s}_JIT_ACCESS_TOKENS", g_tok) or "").split()
+        if "*" not in cur and kid not in cur:
+            cur.append(kid)
+        service_updates[s] = " ".join(cur)
 
     _write_tokens(db, entries, service_updates)
 
@@ -271,8 +282,7 @@ def _create(kwargs, db, request, Response):
             "kid": kid, "label": label, "sites": services, "note": note,
         })
 
-    sites = "".join(f"<li><code>{escape(s)}</code></li>" for s in services) or \
-        '<li class="muted">none selected — the token opens nothing until you add a site</li>'
+    sites = "".join(f"<li><code>{escape(s)}</code></li>" for s in services)
     body = (
         f'<p class="ok">&#10003; Token <b>{escape(label)}</b> created.</p>'
         f'<p>kid: <code>{escape(kid)}</code></p><p>Allowed sites:</p><ul>{sites}</ul>'

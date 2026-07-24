@@ -2,7 +2,7 @@
   "id": "jitaccess",
   "name": "JIT Access",
   "description": "Keep a service dark until a paired browser extension answers a time-based challenge; a valid knock creates a temporary, self-expiring allow entry. Simple mode needs no external dependencies.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "stream": "no",
   "settings": {
     "USE_JIT_ACCESS": {
@@ -17,7 +17,7 @@
     "JIT_ACCESS_TOKENS": {
       "context": "multisite",
       "default": "",
-      "help": "Space-separated token kids allowed to unlock THIS service, or '*' for any registered token. Empty = no device may unlock it.",
+      "help": "Space-separated token kids allowed to unlock THIS service, or '*' for any registered token. Empty = no device may unlock it. Managed automatically when you create tokens on the JIT Access plugin page — edit by hand only for manual setups.",
       "id": "jit-access-tokens",
       "label": "Allowed token kids",
       "regex": "^( *| *\\*| *([A-Za-z0-9_-]+ *)+)$",
@@ -64,7 +64,7 @@
     "JIT_ACCESS_URI_PREFIX": {
       "context": "multisite",
       "default": "/.well-known/jit-access",
-      "help": "Base path for the challenge/respond/enroll endpoints on the protected origin.",
+      "help": "Base path for the challenge/respond/enroll endpoints on the protected origin. Advanced — keep the default unless it collides with a real path; enrolled devices knock on whatever prefix was active when they enrolled.",
       "id": "jit-access-uri-prefix",
       "label": "Protocol URI prefix",
       "regex": "^/[A-Za-z0-9._~/-]+$",
