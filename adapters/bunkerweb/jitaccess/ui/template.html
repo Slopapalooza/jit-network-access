@@ -10,6 +10,13 @@
 {% set d = pre_render.get("data", pre_render) %}
 <div class="col-12" id="jit-root">
 
+  {# BunkerWeb brand-matched accents (CSP style-src allows inline styles). #}
+  <style>
+    #jit-root .jit-success { color: #2eac68 !important; }
+    #jit-root .jit-border { border-color: #2eac68 !important; }
+    #jit-root .jit-badge { background-color: #2eac68 !important; color: #ffffff !important; }
+  </style>
+
   {# ---- metrics ---- #}
   <div class="row g-2 mb-4">
     {% for key, c in d.items() if key.startswith("counter_") %}
@@ -67,16 +74,15 @@
     {% endif %}
     <div class="table-responsive" id="jit-table-wrap" {% if not d.tokens %}style="display:none"{% endif %}>
       <table class="table align-middle">
-        <thead><tr><th>Label</th><th>kid</th><th>Sites it opens</th><th>Expires</th><th class="text-end">Actions</th></tr></thead>
+        <thead><tr><th>Label</th><th>kid</th><th>Sites it opens</th><th class="text-end">Actions</th></tr></thead>
         <tbody id="jit-token-rows">
         {% for t in d.tokens %}
         <tr>
           <td>{{ t.label }}</td>
           <td><code>{{ t.kid }}</code></td>
           <td>
-            {% for s in t.sites %}<span class="badge bg-label-primary me-1"><code>{{ s }}</code></span>{% else %}<span class="text-muted">none</span>{% endfor %}
+            {% for s in t.sites %}<span class="badge jit-badge me-1">{{ s }}</span>{% else %}<span class="text-muted">none</span>{% endfor %}
           </td>
-          <td>{{ t.expiry or "—" }}</td>
           <td class="text-end text-nowrap">
             <form method="post" class="d-inline">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -133,8 +139,8 @@
 
   function renderFlash(p) {
     flash.textContent = "";
-    var box = el("div", "card p-4 shadow-md rounded-3 mb-4 border " + (p.ok ? "border-success" : "border-danger"));
-    box.appendChild(el("h6", p.ok ? "text-success mb-2" : "text-danger mb-2",
+    var box = el("div", "card p-4 shadow-md rounded-3 mb-4 border " + (p.ok ? "jit-border" : "border-danger"));
+    box.appendChild(el("h6", p.ok ? "jit-success mb-2" : "text-danger mb-2",
                        (p.ok ? "✓ " : "✗ ") + (p.message || (p.ok ? "Done." : "The operation failed."))));
     if (p.action === "create" && p.ok) {
       var line = el("p", "mb-1");
@@ -144,18 +150,19 @@
       var sit = el("p", "mb-1");
       sit.appendChild(document.createTextNode("Sites: "));
       if (p.sites && p.sites.length) {
-        p.sites.forEach(function (s) { sit.appendChild(el("span", "badge bg-label-primary me-1", s)); });
+        p.sites.forEach(function (s) { sit.appendChild(el("span", "badge jit-badge me-1", s)); });
       } else {
         sit.appendChild(el("span", "text-muted", "none selected — the token opens nothing until you add a site"));
       }
       box.appendChild(sit);
     }
     if (p.action === "enroll" && p.ok && p.register_url) {
-      var pre = el("pre", "p-2 rounded bg-light border overflow-auto mb-2", p.register_url);
+      var row = el("div", "d-flex align-items-center gap-2 mb-2");
+      var pre = el("pre", "p-2 rounded bg-light border overflow-auto mb-0 flex-grow-1", p.register_url);
       pre.style.whiteSpace = "pre-wrap";
       pre.style.wordBreak = "break-all";
-      box.appendChild(pre);
-      var btn = el("button", "btn btn-sm btn-outline-primary", "Copy link");
+      row.appendChild(pre);
+      var btn = el("button", "btn btn-sm btn-outline-primary flex-shrink-0", "Copy link");
       btn.type = "button";
       btn.addEventListener("click", function () {
         var done = function () { btn.textContent = "Copied ✓"; setTimeout(function () { btn.textContent = "Copy link"; }, 2000); };
@@ -163,7 +170,8 @@
           navigator.clipboard.writeText(p.register_url).then(done, function () { fallbackCopy(pre); done(); });
         } else { fallbackCopy(pre); done(); }
       });
-      box.appendChild(btn);
+      row.appendChild(btn);
+      box.appendChild(row);
       box.appendChild(el("p", "text-muted mt-2 mb-0",
         "Hand it to the user. With the extension installed, they browse to it and click Enroll; " +
         "the browser then opens " + ((p.sites && p.sites.join(", ")) || "the site") + " after a silent knock."));
@@ -210,15 +218,12 @@
       var sitesTd = document.createElement("td");
       if (t.sites && t.sites.length) {
         t.sites.forEach(function (s) {
-          var badge = el("span", "badge bg-label-primary me-1");
-          badge.appendChild(el("code", null, s));
-          sitesTd.appendChild(badge);
+          sitesTd.appendChild(el("span", "badge jit-badge me-1", s));
         });
       } else {
         sitesTd.appendChild(el("span", "text-muted", "none"));
       }
       tr.appendChild(sitesTd);
-      tr.appendChild(el("td", null, t.expiry || "—"));
       var act = el("td", "text-end text-nowrap");
       act.appendChild(actionForm("enroll", t.kid, "btn-outline-primary", "Enroll device", "Get a registration link for a device"));
       act.appendChild(document.createTextNode(" "));
