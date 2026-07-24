@@ -29,43 +29,41 @@ volume, or set `EXTERNAL_PLUGIN_URLS=file:///path/to/jitaccess.tar.gz`.
 ## Status
 
 Access phase (M1/M2), knock protocol + one-time-code `/enroll` (M2/M4), and the
-security suite (M2.5) are implemented and **validated on real BunkerWeb 1.6.10**.
-The plugin embeds the vector-verified core; metrics show on the UI page. Tokens can
-be minted from **`bwcli jitaccess token`** or the **UI page** (Plugins → JIT
-Network Access → *Create a device token*), and enrollment can be handed to a user
-as a **registration URL** they simply browse to (see below).
+security suite (M2.5) are implemented and **validated on real BunkerWeb 1.6.x**.
+The plugin embeds the vector-verified core. The **UI page** (Plugins → **JIT
+Access**) is a full token manager: it lists tokens, creates them against a
+checkbox list of your JIT-enabled services, **regenerates** (device replaced) and
+**deletes** them, and mints a **registration URL** to hand a user — all by editing
+the same `JIT_ACCESS_TOKEN_*` / per-service `JIT_ACCESS_TOKENS` config the
+scheduler already reads (via the DB, method `ui`, like the Global Config page).
+`bwcli jitaccess token` remains for the CLI.
+
+> The plugin's display name is **"JIT Access"** on purpose: BunkerWeb only renders
+> a plugin page when the plugin is "used", which it detects from `USE_<NAME>`
+> (name → `USE_JIT_ACCESS`). So the management page appears once **at least one
+> service has `USE_JIT_ACCESS=yes`** — enable it on a service first.
 
 ## Simple-mode quickstart (no Redis, no database, no real-IP tuning)
 
 1. **Install** the plugin (build/install above), and confirm it loaded:
    `journalctl -u bunkerweb-scheduler | grep -i jitaccess`.
-2. **Create a token** — either from the **UI** (Plugins → JIT Network Access →
-   *Create a device token*, which returns the config line + copy-paste enrollment
-   commands) or the CLI:
-   ```bash
-   bwcli jitaccess token "Jamie laptop"
-   ```
-   Add the printed `JIT_ACCESS_TOKEN=<kid>:<secret>:<label>` to your **global**
-   config.
-3. **Protect a service** (multisite settings):
-   ```
-   app.example.com_USE_JIT_ACCESS=yes
-   app.example.com_JIT_ACCESS_TOKENS=<kid>        # or * for any registered token
-   ```
-   The service is now dark until a valid knock.
-4. **Enroll the browser.** Mint a one-time code (secret never leaves the server);
-   pass `server` to also get a ready-made **registration URL**:
-   ```bash
-   curl -s -H "Host: bwapi" -H "Authorization: Bearer $API_TOKEN" \
-     -X POST http://127.0.0.1:5000/jitaccess/enroll-code \
-     -d '{"kid":"<kid>","origins":["https://app.example.com"],"server":"https://app.example.com"}'
-   # -> {"code":"...","register_url":"https://app.example.com/.well-known/jit-access/register?code=...&origins=..."}
-   ```
-   Hand the user the **`register_url`** — they just browse to it and click **Enroll**
-   on the extension's confirm page (no copy-paste). Alternatively give them the
-   setup string `jitaccess://enroll?v=1&server=…&code=<code>&origins=…` to paste
-   into the extension's options page (see `../../extension`). Either way, visiting
-   `https://app.example.com` then opens after a silent knock.
+2. **Protect a service** — on the service's settings, turn on **Enable JIT Network
+   Access** (`<server>_USE_JIT_ACCESS=yes`). The service goes dark until a valid
+   knock, and the **JIT Access** plugin page now appears.
+3. **Create + wire a token** — Plugins → **JIT Access** → *Create a device token*:
+   enter a label, tick the site(s) it may open, **Create**. This writes the token
+   and adds its `kid` to each selected service's allow-list. (It activates on the
+   next reload, ~1 min.)
+4. **Enroll the device** — in the token list, click **Enroll device**: you get a
+   **registration URL** (secret never in the link). Hand it to the user; with the
+   extension installed they browse to it, click **Enroll**, and the site then
+   opens after a silent knock. **Regenerate** issues a fresh secret for a replaced
+   device (old one revoked immediately); **Delete** removes the token, strips it
+   from every allow-list, and evicts live grants.
+
+CLI/API equivalents (headless): `bwcli jitaccess token`, and
+`POST /jitaccess/enroll-code {kid,origins,server}` on the instance API returns the
+`register_url`.
 
 Hardening (cookie binding, stealth, shared backend, KEK, real-IP trust) is opt-in
 — see `../../DESIGN.md` §1.1 and §11.

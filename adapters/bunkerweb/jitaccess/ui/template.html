@@ -1,19 +1,103 @@
+{# JIT Access plugin page. Rendered by the UI in a bare Jinja env (see actions.py):
+   pre_render is available; csrf_token() rides in via the app jinja globals and is
+   required on every POST (Flask-WTF CSRF). `d` is the pre_render payload whether
+   the UI wraps it as {data: ...} or passes it raw. #}
+{% set d = pre_render.get("data", pre_render) %}
 <div class="col-12">
-  <div class="card p-4 shadow-md rounded-3">
+
+  {# ---- metrics ---- #}
+  <div class="row g-2 mb-4">
+    {% for key, c in d.items() if key.startswith("counter_") %}
+    <div class="col-6 col-md">
+      <div class="card p-3 text-center shadow-md rounded-3 h-100">
+        <div class="h3 mb-0">{{ c.value }}</div>
+        <div class="small text-muted">{{ c.subtitle }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {# ---- create a token ---- #}
+  <div class="card p-4 shadow-md rounded-3 mb-4">
     <h5 class="mb-1">Create a device token</h5>
-    <p class="text-muted mb-3">Generate a JIT Access token to add to your global config, with a registration URL to hand to the user.</p>
+    <p class="text-muted mb-3">Generate a JIT Access token and choose which of your JIT-enabled sites it may open.</p>
+    {% if d.services %}
     <form method="post">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="create">
       <div class="mb-3">
         <label class="form-label">Label</label>
         <input class="form-control" name="label" placeholder="Jamie laptop" maxlength="64" required>
+        <div class="form-text">Letters, numbers, spaces, <code>. _ -</code> only.</div>
       </div>
       <div class="mb-3">
-        <label class="form-label">Origin(s) this token may open</label>
-        <input class="form-control" name="origins" placeholder="https://app.example.com, https://wiki.example.com" required>
-        <div class="form-text">Comma-separated https origins. Also set <code>&lt;server&gt;_JIT_ACCESS_TOKENS=&lt;kid&gt;</code> on each.</div>
+        <label class="form-label">Sites this token may open</label>
+        {% for s in d.services %}
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="services" value="{{ s }}" id="jit_svc_{{ loop.index }}">
+          <label class="form-check-label" for="jit_svc_{{ loop.index }}"><code>{{ s }}</code></label>
+        </div>
+        {% endfor %}
       </div>
-      <button class="btn btn-primary" type="submit">Generate token</button>
+      <button class="btn btn-primary" type="submit">Create token</button>
     </form>
+    {% else %}
+    <p class="text-muted mb-0">
+      No services have JIT Access enabled yet. Turn on <code>Enable JIT Network Access</code>
+      (<code>USE_JIT_ACCESS</code>) on a service's settings page — it goes dark until a valid knock —
+      then create a token for it here.
+    </p>
+    {% endif %}
   </div>
+
+  {# ---- existing tokens ---- #}
+  <div class="card p-4 shadow-md rounded-3">
+    <h5 class="mb-1">Device tokens</h5>
+    <p class="text-muted mb-3">Each token is one enrolled device. Secrets are never shown.</p>
+    {% if d.load_error %}
+    <div class="alert alert-danger">Could not load tokens: {{ d.load_error }}</div>
+    {% endif %}
+    {% if d.tokens %}
+    <div class="table-responsive">
+      <table class="table align-middle">
+        <thead><tr><th>Label</th><th>kid</th><th>Sites it opens</th><th>Expires</th><th class="text-end">Actions</th></tr></thead>
+        <tbody>
+        {% for t in d.tokens %}
+        <tr>
+          <td>{{ t.label }}</td>
+          <td><code>{{ t.kid }}</code></td>
+          <td>
+            {% for s in t.sites %}<span class="badge bg-label-primary me-1"><code>{{ s }}</code></span>{% else %}<span class="text-muted">none</span>{% endfor %}
+          </td>
+          <td>{{ t.expiry or "—" }}</td>
+          <td class="text-end text-nowrap">
+            <form method="post" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="enroll">
+              <input type="hidden" name="kid" value="{{ t.kid }}">
+              <button class="btn btn-sm btn-outline-primary" type="submit" title="Get a registration link for a device">Enroll device</button>
+            </form>
+            <form method="post" class="d-inline" onsubmit="return confirm('Regenerate {{ t.label }}? The current device stops working until you re-enroll it with the new secret.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="regenerate">
+              <input type="hidden" name="kid" value="{{ t.kid }}">
+              <button class="btn btn-sm btn-outline-secondary" type="submit" title="New secret, same kid (device replaced)">Regenerate</button>
+            </form>
+            <form method="post" class="d-inline" onsubmit="return confirm('Delete {{ t.label }}? This permanently removes the token, strips it from every site, and revokes any active access.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="delete">
+              <input type="hidden" name="kid" value="{{ t.kid }}">
+              <button class="btn btn-sm btn-outline-danger" type="submit" title="Remove this token">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">No tokens yet. Create one above.</p>
+    {% endif %}
+  </div>
+
 </div>
