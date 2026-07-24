@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8">
   <title>JIT Network Access — Enroll device</title>
+  <!-- enroll.html is web_accessible so the service worker can redirect a tab to it;
+       refuse to run inside a frame to prevent a hostile page from clickjacking Enroll. -->
+  <script>if (window.top !== window.self) { document.documentElement.textContent = "This page cannot be embedded."; throw new Error("framed"); }</script>
   <style>
     body { font: 15px system-ui, sans-serif; margin: 3rem auto; max-width: 460px; padding: 0 1rem; }
     h1 { font-size: 1.3rem; }

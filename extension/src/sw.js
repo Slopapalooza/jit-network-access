@@ -81,7 +81,11 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (d) => {
       origins: u.searchParams.get("origins") || u.origin,
       label: u.searchParams.get("label") || "",
     }).toString();
-    chrome.tabs.update(d.tabId, { url: dest });
+    console.log("[JIT] registration URL detected:", u.href, "→ redirecting tab", d.tabId, "to enroll page");
+    chrome.tabs.update(d.tabId, { url: dest }).then(
+      () => console.log("[JIT] redirect to enroll page OK"),
+      (e) => console.error("[JIT] tabs.update to enroll page FAILED:", e && e.message),
+    );
     return;
   }
 

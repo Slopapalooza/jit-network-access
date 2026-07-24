@@ -8,5 +8,8 @@
   "background": { "service_worker": "src/sw.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "JIT Network Access" },
   "options_page": "options.html",
+  "web_accessible_resources": [
+    { "resources": ["enroll.html"], "matches": ["https://*/*"] }
+  ],
   "icons": {}
 }
