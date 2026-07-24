@@ -391,7 +391,12 @@ function jitaccess:api()
     local rand = ccrypto.random_bytes(12)
     if not rand then return self:ret(true, "rng failed", ngx.HTTP_INTERNAL_SERVER_ERROR) end
     local code = ccrypto.b64u_encode(rand)
-    local ttl = tonumber(body.ttl) or 900
+    -- Link lifetime: explicit body.ttl wins, else the JIT_ACCESS_ENROLL_TTL
+    -- setting (default 24 h). Clamped so a typo can't mint an immortal code.
+    local ttl = tonumber(body.ttl)
+        or tonumber((self.variables and self.variables["JIT_ACCESS_ENROLL_TTL"]) or "")
+        or 86400
+    if ttl < 300 then ttl = 300 elseif ttl > 604800 then ttl = 604800 end
     local origins = type(body.origins) == "table" and body.origins or {}
     local ok, err = self.store:enroll_code_put(code, { kid = body.kid, origins = origins }, ttl)
     if not ok then return self:ret(true, "code create failed: " .. tostring(err), ngx.HTTP_INTERNAL_SERVER_ERROR) end
