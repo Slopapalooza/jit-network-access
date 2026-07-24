@@ -1,8 +1,11 @@
 {
   "manifest_version": 3,
   "name": "JIT Network Access",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Silently answers the JIT Network Access knock so protected origins open transparently.",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; frame-ancestors 'none'"
+  },
   "permissions": ["storage", "webNavigation", "webRequest", "tabs"],
   "optional_host_permissions": ["https://*/*"],
   "background": { "service_worker": "src/sw.js", "type": "module" },

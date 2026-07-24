@@ -45,6 +45,9 @@ export async function enroll({ kid, secretBytes, origins, label }) {
   const key = await importSecret(secretBytes);   // non-extractable
   await idbPut(kid, key);                          // only the key handle persists
   const tokens = (await listTokens()).filter((t) => t.kid !== kid);
+  if (!label && origins && origins.length) {
+    try { label = new URL(origins[0]).hostname; } catch { label = ""; }   // registration-URL flow has no label
+  }
   tokens.push({ kid, origins, label: label || "" });
   await chrome.storage.local.set({ tokens });
 }
