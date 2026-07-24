@@ -105,7 +105,11 @@
     <p class="text-muted mb-0" id="jit-empty" {% if d.tokens %}style="display:none"{% endif %}>No tokens yet. Create one above.</p>
   </div>
 
-<script>
+{# The UI's CSP is script-src 'nonce-...' 'strict-dynamic' — inline scripts run
+   ONLY with the per-response nonce (script_nonce rides into this render via
+   g._env, same as the UI's own plugin_page.html wrapper). Without it the page
+   still works via the plain-POST fallback. #}
+<script nonce="{{ script_nonce | default('') }}">
 (function () {
   "use strict";
   var root = document.getElementById("jit-root");
