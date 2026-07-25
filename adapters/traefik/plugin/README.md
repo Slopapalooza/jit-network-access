@@ -7,6 +7,8 @@ gate runs inside Traefik.
 > Prefer this over the [`forwardAuth` recipe](..) unless you need one Authorizer
 > shared by several proxies.
 
+See [How it works](../../../docs/how-it-works.md) for the protocol in diagrams.
+
 ## Install
 
 ### Plugin catalog / remote

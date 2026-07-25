@@ -8,7 +8,9 @@ all state lives in nginx shared memory.
 
 This guide covers the admin workflow: enabling the gate on a service, issuing a
 device token, and handing an enrollment link to a user. For the browser side,
-see the [Chrome extension guide](chrome-extension-guide.md).
+see the [Chrome extension guide](chrome-extension-guide.md); for how the
+protocol actually works, see [How it works](how-it-works.md) — it is mostly
+diagrams.
 
 > Screenshots below use `app.example.com` and placeholder token IDs in place of
 > real hostnames.
@@ -67,7 +69,8 @@ Click **Copy link** and send it to the user (email, chat, ticket). The link is:
   secret over TLS at enrollment time; the secret never travels in the URL.
 
 The user opens the link in a browser that has the [extension](chrome-extension-guide.md)
-installed and clicks **Enroll**. From then on that browser opens the site
+installed and clicks **Enroll**
+([what happens then, in one diagram](how-it-works.md#4-enrolling-a-device)). From then on that browser opens the site
 transparently after a silent knock.
 
 ---
@@ -124,7 +127,7 @@ on the same public IP inherits access that one enrolled device earned. Inner
 authentication still applies, but the service is no longer dark to them.
 
 Setting `JIT_ACCESS_BINDING=ip+cookie` binds the grant to the **browser** as
-well. A successful knock returns an opaque random grant id as a cookie:
+well ([why an IP alone isn't enough](how-it-works.md#5-grant-binding-why-ip-isnt-always-enough)). A successful knock returns an opaque random grant id as a cookie:
 
 ```
 __Host-jit-grant=<32 random bytes, base64url>; Path=/; Secure; HttpOnly; SameSite=Strict

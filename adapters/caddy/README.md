@@ -6,6 +6,8 @@ protocol, canonical grant keys and crypto are the same code the standalone
 Authorizer runs — and, via the shared vectors, the same constructions the
 BunkerWeb Lua plugin implements. One extension, one enrolled token, any engine.
 
+See [How it works](../../docs/how-it-works.md) for the protocol in diagrams.
+
 **No extra process and no forward-auth hop.** Because the handler runs
 in-process it reads the un-forgeable TCP peer directly, so it has none of the
 IP-provenance caveats that apply to the [Authorizer](../../authorizer).
