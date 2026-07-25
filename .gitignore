@@ -36,3 +36,9 @@ bw-data/
 # Local-only working docs (not published)
 SECURITY-REVIEW.md
 docs/*-debug-*.md
+
+# Go
+core/go/*.exe
+authorizer/jitaccess-authorizer
+authorizer/*.exe
+authorizer/config.json
