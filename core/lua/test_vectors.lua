@@ -1,3 +1,6 @@
+-- JIT Network Access - Copyright (C) 2026 Slopapalooza
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+
 -- Conformance check for the Lua core against the shared vectors.
 -- Run under OpenResty (ngx.* + resty.openssl required):
 --

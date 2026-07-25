@@ -6,5 +6,6 @@
   "description": "Chromium MV3 extension: silently answers the JIT Network Access knock so protected origins open transparently.",
   "scripts": {
     "test": "node src/jitcrypto.test.mjs"
-  }
+  },
+  "license": "AGPL-3.0-or-later"
 }

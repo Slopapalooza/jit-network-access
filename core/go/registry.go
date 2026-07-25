@@ -1,3 +1,6 @@
+// JIT Network Access - Copyright (C) 2026 Slopapalooza
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 package jitcore
 
 import "errors"

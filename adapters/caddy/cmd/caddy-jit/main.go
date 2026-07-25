@@ -1,3 +1,6 @@
+// JIT Network Access - Copyright (C) 2026 Slopapalooza
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // caddy-jit is a Caddy build with the jit_access handler compiled in.
 //
 // This exists so the module can be built with plain `go build` — no xcaddy, no

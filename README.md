@@ -72,3 +72,31 @@ This project is being developed on a host **without Lua or Docker**. Therefore:
 ## Status of the concept
 
 Early-stage. The design has been through a six-lens adversarial review (see `SECURITY-REVIEW.md`); the findings are folded into `DESIGN.md` §11 and the code is being built to satisfy them from the start.
+
+## License
+
+**[GNU Affero General Public License v3.0 or later](LICENSE)** (AGPL-3.0-or-later).
+
+You may use, run, modify and redistribute this software freely, including inside
+a commercial product and for commercial purposes. The condition is reciprocity:
+if you modify it and make it available to others — **including over a network** —
+you must release your modified source under the same license.
+
+In practice:
+
+| | |
+|---|---|
+| Run it to protect your own services, commercial or not | ✅ no obligations |
+| Modify it for internal use only | ✅ no obligation to publish |
+| Ship it inside a product you sell | ✅ but your modifications must be published under AGPL |
+| Offer a hosted/managed JIT Access service | ✅ but your fork's source must be published |
+| Take it closed-source | ❌ |
+
+AGPL-3.0 was chosen deliberately: it keeps the project genuinely open source, it
+matches [BunkerWeb](https://github.com/bunkerity/bunkerweb)'s own license (so the
+plugin can be contributed upstream), and its network clause is what prevents the
+work being absorbed into a closed product without anything flowing back.
+
+The wire protocol itself ([`docs/PROTOCOL.md`](docs/PROTOCOL.md)) is a
+specification, not code — independent implementations are welcome and the shared
+conformance vectors exist precisely so they can prove interoperability.

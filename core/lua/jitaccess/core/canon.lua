@@ -1,3 +1,6 @@
+-- JIT Network Access - Copyright (C) 2026 Slopapalooza
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+
 -- jitaccess.core.canon — normative canonicalization (docs/PROTOCOL.md §4)
 --
 -- canon_server_name(host)             -> string

@@ -6,13 +6,33 @@
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; frame-ancestors 'none'"
   },
-  "permissions": ["storage", "webNavigation", "webRequest", "tabs"],
-  "optional_host_permissions": ["https://*/*"],
-  "background": { "service_worker": "src/sw.js", "type": "module" },
-  "action": { "default_popup": "popup.html", "default_title": "JIT Network Access" },
+  "permissions": [
+    "storage",
+    "webNavigation",
+    "webRequest",
+    "tabs"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "src/sw.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "JIT Network Access"
+  },
   "options_page": "options.html",
   "web_accessible_resources": [
-    { "resources": ["enroll.html"], "matches": ["https://*/*"] }
+    {
+      "resources": [
+        "enroll.html"
+      ],
+      "matches": [
+        "https://*/*"
+      ]
+    }
   ],
   "icons": {}
 }

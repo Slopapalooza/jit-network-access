@@ -1,3 +1,6 @@
+// JIT Network Access - Copyright (C) 2026 Slopapalooza
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Package jitcore is the Go reference implementation of the JIT Network Access
 // portable core (L3). It is the library the standalone Authorizer and the native
 // Caddy module embed, and it is the second implementation (after core/lua) that
