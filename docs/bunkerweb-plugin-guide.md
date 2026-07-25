@@ -105,7 +105,7 @@ settings can differ per service; `global` settings apply instance‑wide.
 | `JIT_ACCESS_TOKENS` | — | multisite | Space‑separated token `kid`s allowed to open this service, or `*` for any. **Managed automatically** when you create tokens on the plugin page. |
 | `JIT_ACCESS_GRANT_TIME` | `3600` | multisite | Grant lifetime in seconds. The allow entry expires automatically. |
 | `JIT_ACCESS_FAILURE_MODE` | `interstitial` | multisite | `interstitial` = short authorization page + detection marker (best UX). `stealth` = generic 404 (gate invisible). |
-| `JIT_ACCESS_BINDING` | `ip` | multisite | `ip` admits the client IP. `ip+cookie` also requires a device‑bound cookie (hardened). |
+| `JIT_ACCESS_BINDING` | `ip` | multisite | `ip` admits the client IP. `ip+cookie` also requires a device‑bound cookie — see [below](#ipcookie-binding-shared-egress). |
 | `JIT_ACCESS_SKIP_CHECKS` | `no` | multisite | If `yes`, a valid grant short‑circuits the rest of the security pipeline (whitelist semantics). Pair with `ip+cookie`. |
 | `JIT_ACCESS_URI_PREFIX` | `/.well-known/jit-access` | multisite | Base path for the challenge/respond/enroll endpoints. Advanced — enrolled devices knock on whatever prefix was active when they enrolled. |
 | `JIT_ACCESS_ENROLL_TTL` | `86400` | global | Enrollment link/code lifetime in seconds (24 h default, clamped 300–604800). Links survive config reloads; a full nginx restart voids outstanding links. |
@@ -115,6 +115,52 @@ settings can differ per service; `global` settings apply instance‑wide.
 | `JIT_ACCESS_RATELIMIT` | `10r/m` | global | Per‑IP rate limit on the knock endpoints. |
 
 ---
+
+## `ip+cookie` binding (shared egress)
+
+With the default `ip` binding, a grant admits **an IP address**. Behind a shared
+egress — office NAT, CGNAT, a VPN concentrator — that means every other client
+on the same public IP inherits access that one enrolled device earned. Inner
+authentication still applies, but the service is no longer dark to them.
+
+Setting `JIT_ACCESS_BINDING=ip+cookie` binds the grant to the **browser** as
+well. A successful knock returns an opaque random grant id as a cookie:
+
+```
+__Host-jit-grant=<32 random bytes, base64url>; Path=/; Secure; HttpOnly; SameSite=Strict
+```
+
+Only the cookie's SHA‑256 is stored in the grant, so a dump of the grant store
+yields nothing usable, and the comparison is constant‑time. A request from the
+right IP **without** the right cookie is denied.
+
+Each attribute is load-bearing:
+
+| Attribute | Why |
+| --- | --- |
+| `__Host-` prefix | pins `Secure` + `Path=/` + no `Domain`, so a sibling subdomain cannot set or overwrite the grant cookie |
+| `SameSite=Strict` | `Lax` would send the cookie on a cross-site top-level navigation, letting a malicious page drive a victim's browser through the gate |
+| `HttpOnly` | script on the origin cannot read the grant id |
+| hash at rest | the store never holds a working credential |
+
+**Requirements:** the browser extension must be **v0.2.1 or later** — earlier
+versions knocked with credentials omitted, so the browser discarded the cookie
+and the grant could never be satisfied. Enable it per service:
+
+```bash
+# on the service's JIT Access settings, set:
+JIT_ACCESS_BINDING = ip+cookie
+```
+
+Then re-knock (or just reload the site) so enrolled devices pick up a cookie —
+existing `ip`-bound grants keep working until they expire.
+
+Verify it with the engine-agnostic probe:
+
+```bash
+python test/conformance/cookie_binding.py --url https://app.example.com \
+    --kid kid_xxx --secret <base64url-secret>
+```
 
 ## Notes & caveats
 

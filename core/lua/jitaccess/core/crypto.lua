@@ -8,6 +8,7 @@
 -- equivalent port before commit; the harness re-validates under real Lua.
 
 local hmac    = require "resty.openssl.hmac"
+local digest  = require "resty.openssl.digest"
 local rand    = require "resty.openssl.rand"
 local pae     = require "jitaccess.core.pae"
 local canon   = require "jitaccess.core.canon"
@@ -15,6 +16,7 @@ local bit     = require "bit"      -- LuaJIT
 
 local bor, bxor = bit.bor, bit.bxor
 local byte, sub, char = string.byte, string.sub, string.char
+local format = string.format
 local floor = math.floor
 local concat = table.concat
 
@@ -63,6 +65,19 @@ local function ct_equal(a, b)
   return diff == 0
 end
 _M.ct_equal = ct_equal
+
+-- SHA-256, lowercase hex. Used for the ip+cookie grant-id hash, so only the
+-- hash of the cookie is ever stored; a dump of the grant store yields no
+-- working credential. Byte-identical to CookieHash() in core/go.
+function _M.sha256_hex(s)
+  local d, err = digest.new("sha256")
+  if not d then return nil, err end
+  local out, e = d:final(s)
+  if not out then return nil, e end
+  local hex = {}
+  for i = 1, #out do hex[i] = format("%02x", byte(out, i)) end
+  return concat(hex)
+end
 
 -- CSPRNG; fails closed (returns nil) on error — callers MUST reject on nil.
 function _M.random_bytes(n)

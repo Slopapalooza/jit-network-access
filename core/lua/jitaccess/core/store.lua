@@ -19,6 +19,19 @@ local mt = { __index = methods }
 local GRANT_PREFIX = "jit:grant:"
 local NONCE_PREFIX = "jit:nonce:"
 
+-- Constant-time string equality, implemented locally so this module keeps no
+-- crypto dependency. Length is not secret (both sides are fixed-width hex).
+local byte = string.byte
+local function ct_equal(a, b)
+  if type(a) ~= "string" or type(b) ~= "string" or #a ~= #b then return false end
+  local diff = 0
+  for i = 1, #a do
+    local x, y = byte(a, i), byte(b, i)
+    diff = diff + (x == y and 0 or 1)
+  end
+  return diff == 0
+end
+
 -- opts.grants  : ngx.shared dict for grants        (required, Simple)
 -- opts.nonces  : ngx.shared dict for spent nonces  (required, Simple) — MUST be
 --                a dedicated dict, isolated from grants and from BunkerWeb bans
@@ -87,8 +100,12 @@ function methods:is_allowed(sname_canon, ip_canon, registry, now, cookie_hash_pr
     if registry:is_expired(token, now) then return nil end
   end
   if rec.binding == "ip+cookie" then
-    -- HARDENED: compare presented opaque grant-id cookie hash to rec.cookie_hash
-    if not cookie_hash_present or cookie_hash_present ~= rec.cookie_hash then return nil end
+    -- The grant is additionally bound to the browser that knocked: the client
+    -- must present the opaque grant-id cookie whose hash we stored. On shared
+    -- egress (office NAT, CGNAT, VPN) this stops a co-located client that
+    -- merely shares the IP from inheriting access (SECURITY-REVIEW C5/H11).
+    if not cookie_hash_present or not rec.cookie_hash then return nil end
+    if not ct_equal(cookie_hash_present, rec.cookie_hash) then return nil end
   end
   return rec
 end

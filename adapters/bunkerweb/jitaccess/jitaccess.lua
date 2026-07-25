@@ -30,6 +30,7 @@ local jitaccess = class("jitaccess", plugin)
 
 local MARKER = "challenge; v=1"
 local DUMMY_KEY = string.rep("\0", 32)   -- equalized-work HMAC key for unknown kid
+local GRANT_COOKIE = "__Host-jit-grant"  -- opaque grant id for ip+cookie binding
 
 local function deny_status()
   if utils.get_deny_status then
@@ -148,8 +149,48 @@ function jitaccess:client_ip_canon()
   return ccanon.canon_ip(ip, self:ipv6_prefix())
 end
 
+-- ---- ip+cookie binding -----------------------------------------------------
+-- With JIT_ACCESS_BINDING=ip+cookie a grant is bound to the browser that
+-- knocked, not just to its IP. The knock response sets an opaque, host-only
+-- grant id; only its SHA-256 is stored, so the grant store holds no usable
+-- credential. Required on shared egress and for services with no downstream
+-- auth (DESIGN §11 R3 / SECURITY-REVIEW C5/H11).
+
+-- Read the grant cookie by exact name. Parsed from the raw header rather than
+-- $cookie_* because nginx mangles the "__Host-" prefix into a variable name.
+function jitaccess:grant_cookie()
+  local header = ngx.var.http_cookie
+  if not header or header == "" then return nil end
+  for pair in header:gmatch("[^;]+") do
+    local k, v = pair:match("^%s*([^=%s]+)%s*=%s*(.-)%s*$")
+    if k == GRANT_COOKIE and v ~= "" then return v end
+  end
+  return nil
+end
+
+-- Hash of the presented cookie, or nil when absent. store:is_allowed compares
+-- this (constant-time) against the grant's stored hash.
 function jitaccess:cookie_hash()
-  return nil   -- HARDENED (M6): opaque grant-id cookie. M1/M2 = ip binding.
+  local v = self:grant_cookie()
+  if not v then return nil end
+  return ccrypto.sha256_hex(v)
+end
+
+-- Mint a fresh grant id and emit it. SameSite=Strict is required, not
+-- incidental: with Lax a cross-site top-level navigation would carry the cookie
+-- and drive the victim's browser through the gate (SECURITY-REVIEW H11).
+-- The __Host- prefix pins Secure + Path=/ + no Domain, so a sibling subdomain
+-- cannot set or overwrite it.
+function jitaccess:issue_grant_cookie(ttl)
+  local raw = ccrypto.random_bytes(32)
+  if not raw then return nil end
+  local id = ccrypto.b64u_encode(raw)
+  local ok = pcall(function()
+    ngx.header["Set-Cookie"] = GRANT_COOKIE .. "=" .. id ..
+      "; Path=/; Max-Age=" .. tostring(ttl) .. "; Secure; HttpOnly; SameSite=Strict"
+  end)
+  if not ok then return nil end
+  return ccrypto.sha256_hex(id)
 end
 
 -- best-effort per-IP rate limit on knock endpoints (shared nonce dict, rl: prefix)
@@ -217,8 +258,18 @@ function jitaccess:verify_knock(sname, ip, body)
   if not self.store:nonce_claim(ccrypto.b64u_encode(rand), nttl) then return false end
 
   local ttl = tonumber(self.variables["JIT_ACCESS_GRANT_TIME"] or "3600") or 3600
+  local binding = self.variables["JIT_ACCESS_BINDING"] or "ip"
+
+  -- ip+cookie: bind the grant to this browser as well as this IP. Fail closed —
+  -- if the id cannot be minted we do NOT silently downgrade to ip-only.
+  local cookie_hash
+  if binding == "ip+cookie" then
+    cookie_hash = self:issue_grant_cookie(ttl)
+    if not cookie_hash then return false end
+  end
+
   local rec = cstore.record(sname, ip, kid, ttl,
-                            { manual = false, binding = self.variables["JIT_ACCESS_BINDING"] or "ip" })
+                            { manual = false, binding = binding, cookie_hash = cookie_hash })
   return self.store:put_grant(sname, ip, rec, ttl) == true
 end
 
