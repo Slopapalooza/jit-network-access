@@ -1,0 +1,87 @@
+# Gating app.example.com behind JIT Network Access.
+#
+# TWO Ingresses are required:
+#   1. the knock endpoints -> Authorizer, with NO auth annotation (a dark
+#      service must still be knockable, or nobody could ever get in)
+#   2. the app itself -> your Service, gated by auth-url
+#
+# ingress-nginx matches the more specific path first, so ordering is automatic.
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-jit-protocol
+  namespace: default
+  annotations:
+    # deliberately NO auth-url here
+    nginx.ingress.kubernetes.io/proxy-body-size: 8k
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /.well-known/jit-access/
+            pathType: Prefix
+            backend:
+              service:
+                name: jit-authorizer-proxy
+                port:
+                  number: 8998
+  tls:
+    - hosts: [app.example.com]
+      secretName: app-example-com-tls
+---
+# ExternalName into the jit-system namespace, since an Ingress backend must live
+# in the same namespace as the Ingress.
+apiVersion: v1
+kind: Service
+metadata:
+  name: jit-authorizer-proxy
+  namespace: default
+spec:
+  type: ExternalName
+  externalName: jit-authorizer.jit-system.svc.cluster.local
+  ports:
+    - port: 8998
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app
+  namespace: default
+  annotations:
+    # THE GATE: every request is authorized by the Authorizer first.
+    nginx.ingress.kubernetes.io/auth-url: "http://jit-authorizer.jit-system.svc.cluster.local:8998/authz"
+    # Required for binding: "ip+cookie" — carries the grant cookie back to the
+    # browser. Harmless with plain ip binding.
+    nginx.ingress.kubernetes.io/auth-response-headers: "Set-Cookie, X-JIT-Kid"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app
+                port:
+                  number: 80
+  tls:
+    - hosts: [app.example.com]
+      secretName: app-example-com-tls
+---
+# See README.md — without client-IP preservation every external client looks
+# like a node IP and they will SHARE grants. Set this on the ingress-nginx
+# Service (usually via the controller's Helm values, shown here for reference):
+#
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: ingress-nginx-controller
+#   namespace: ingress-nginx
+# spec:
+#   type: LoadBalancer
+#   externalTrafficPolicy: Local     # <-- preserves the real client IP
