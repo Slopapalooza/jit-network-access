@@ -82,6 +82,10 @@ docker compose down -v
 
 ## Validated on a real BunkerWeb instance (1.6.10, systemd)
 
+> The plugin now runs on **1.6.13** in production, where the load path and the
+> full knock + `ip+cookie` enforcement were re-verified (12/12). The matrices
+> below were originally recorded on 1.6.10; the compose file here pins 1.6.13.
+
 M1 was run end-to-end against a live BunkerWeb 1.6.10 (Linux-package) install, installing the plugin via the control API and testing a disposable `jittest.local` vhost. Result: **5/5** — dark-by-default (403), `X-JIT-Access` interstitial marker present, manual grant admits (200), `/.well-known/jit-access/*` stays dark even when granted, revoke re-darkens. The `api()` grant/revoke endpoints worked on the instance internal API, and installing the plugin did not change any co-hosted service's responses.
 
 **Deployment finding — plugin ordering matters.** `jitaccess` runs **last** in BunkerWeb's access phase (order: `ssl, whitelist, …, reversescan, limit, …, antibot, jitaccess`). This is correct for the greylist-semantics default (a grant admits the client *into* the pipeline; the other security plugins still apply). But two consequences to document for operators:

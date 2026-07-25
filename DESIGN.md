@@ -1,7 +1,7 @@
 # JIT Network Access — Design Plan
 
 **Status:** Draft v1.2 — 2026-07-23 · hardened after adversarial review · two deployment profiles (Simple = zero external deps, Hardened = opt-in)
-**Targets:** Engine-agnostic protocol + portable core · **BunkerWeb 1.6.x** as the flagship enforcement adapter (verified against v1.6.13 source) · Chromium **Manifest V3** extension
+**Targets:** Engine-agnostic protocol + portable core · **BunkerWeb 1.6.x** as the flagship enforcement adapter (verified against v1.6.13 source; running and re-verified on 1.6.13) · Chromium **Manifest V3** extension
 
 > ⚠️ **Security gate — consult the project's internal adversarial security review before building.** A six-lens adversarial review found ~10 Critical issues, several exploitable as designed, whose through-line is that the system as originally drafted **fails open more often than closed**. The blocking fixes are consolidated in **§11** and folded into the sections below (look for **[SEC]** markers). Do not start M1 until §11's gate items are reflected in the spec.
 
