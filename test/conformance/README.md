@@ -22,9 +22,9 @@ Prints `KNOCK <code>` (204 = accepted), and optionally `SERVICE <code>` /
 ## `security_suite.py` — adversarial probes (M2.5)
 
 An adapter is "supported" only when it passes these, not just the functional
-knock. **12/12 validated on real BunkerWeb 1.6.10** (the suite needs two
-JIT-enabled services, so re-run it on 1.6.13 via the two-service harness in
-`../harness/`, whose compose file pins 1.6.13).
+knock. **12/12 validated on real BunkerWeb.** The suite needs two JIT-enabled
+services, so run it against the two-service harness in `../harness/` (pinned to
+1.6.13).
 
 | Probe | Property |
 |---|---|

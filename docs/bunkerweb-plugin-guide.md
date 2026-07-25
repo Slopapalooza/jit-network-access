@@ -12,9 +12,8 @@ see the [Chrome extension guide](chrome-extension-guide.md); for how the
 protocol actually works, see [How it works](how-it-works.md) — it is mostly
 diagrams.
 
-**Tested on BunkerWeb 1.6.10 and 1.6.13** (currently running on 1.6.13). It uses
-only documented plugin interfaces, so any 1.6.x should work — but 1.6.13+ is what
-is exercised in production.
+**Tested on BunkerWeb 1.6.13.** It uses only documented plugin interfaces, so any
+1.6.x should work — 1.6.13 is what is exercised in production.
 
 > Screenshots below use `app.example.com` and placeholder token IDs in place of
 > real hostnames.
