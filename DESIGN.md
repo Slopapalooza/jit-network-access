@@ -466,6 +466,15 @@ Redis (shared-backend) GrantStore with signed values + AUTH/ACL/TLS; the **proxy
 
 Distilled from the internal adversarial security review. Six root causes. **Each is tagged [BASELINE] (always on, both profiles, no external dependency) or [HARDENED] (opt-in, or only relevant once a shared backend / real-IP / harsher threat model is introduced — §1.1).** The baseline items are what make even a zero-dependency home setup sound; the hardened items are the deeper lockdown for advanced users.
 
+> **On the `SECURITY-REVIEW <id>` citations.** Comments across the codebase cite
+> individual review findings by id — `C<n>` for Critical, `H<n>` for High — so
+> that any defensive measure can be traced back to the attack that motivated it
+> (e.g. `SECURITY-REVIEW C2` on the client-IP handling, `H11` on the grant
+> cookie's `SameSite=Strict`). The review document itself is not published — it
+> is a working artifact that also enumerates unmitigated attack paths — but
+> **this section is the authoritative index of what those ids mean**, and the
+> `R1`–`R6` requirements below are the fixes they produced.
+
 **R1 — Fail CLOSED everywhere. [BASELINE]** BunkerWeb's access chain fails *open* on a plugin error (verified). Wrap the whole `access()` body in the plugin's own `pcall` → explicit deny on any error; promote `is_jit_allowed` to a conf-layer default-deny gate independent of the Lua; fail closed on any store error; harness tests for corrupt-registry / deleted-plugin / malformed-input → must deny. **[HARDENED]** the network invariant "origin accepts traffic only from its JIT adapter" with default-deny recipe scaffolds (matters most for multi-path/multi-node topologies).
 
 **R2 — Never trust a client-supplied IP.** **[BASELINE]** the safe default is `USE_REAL_IP=no` — key on the TCP peer, ignore XFF entirely (correct when the edge server faces the internet directly). **[HARDENED]** when deliberately behind a CDN/LB, real-IP is configured with explicit trusted CIDRs (right-most-untrusted XFF), never broad defaults; forged-XFF harness assertion.

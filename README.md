@@ -74,7 +74,7 @@ This project is being developed on a host **without Lua or Docker**. Therefore:
 
 ## Status of the concept
 
-Early-stage. The design has been through a six-lens adversarial review (see `SECURITY-REVIEW.md`); the findings are folded into `DESIGN.md` §11 and the code is being built to satisfy them from the start.
+Early-stage. The design has been through a six-lens adversarial security review; its findings are consolidated in [`DESIGN.md` §11](DESIGN.md) and the code has been built to satisfy them from the start. Comments throughout the codebase cite individual findings by id (`SECURITY-REVIEW C1`, `H11`, …) so each defensive measure is traceable to the reason it exists — §11 is the published index of those ids.
 
 ## License
 
