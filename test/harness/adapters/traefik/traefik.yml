@@ -1,0 +1,19 @@
+# Traefik static configuration for the lab.
+entryPoints:
+  web:
+    address: ":80"
+
+providers:
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+log:
+  level: INFO
+
+# The JIT middleware is a LOCAL plugin: Traefik interprets its source with
+# Yaegi from /plugins-local/src/<module path>.
+experimental:
+  localPlugins:
+    jitaccess:
+      moduleName: github.com/Slopapalooza/jit-network-access/adapters/traefik/plugin

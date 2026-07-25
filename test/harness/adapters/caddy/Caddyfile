@@ -1,0 +1,13 @@
+{
+	admin off
+	auto_https off
+}
+
+:80 {
+	jit_access {
+		token kid_lab AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE lab device
+		allow kid_lab
+		grant_ttl 1h
+	}
+	reverse_proxy upstream:8080
+}

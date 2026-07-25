@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 
 	jitcore "github.com/Slopapalooza/jit-network-access/core/go"
@@ -125,6 +126,12 @@ func forwardedList(r *http.Request, header string) []string {
 // ServiceName returns the canonical service the request is for. Behind a trusted
 // proxy the forwarded host wins (the Host header on a forward-auth subrequest is
 // the Authorizer's own address, not the origin); otherwise only Host is trusted.
+//
+// ingress-nginx is the reason X-Original-URL is consulted: its auth subrequest
+// sets Host to the *auth service's* address and carries the real origin only
+// inside X-Original-URL ($scheme://$http_host$request_uri). Without this, every
+// Kubernetes deployment resolves the service name to the Authorizer's own
+// address, matches no configured service, and denies everything.
 func (c *Config) ServiceName(r *http.Request) string {
 	if peer, err := peerAddr(r); err == nil && c.isTrusted(peer) {
 		for _, h := range []string{"X-Forwarded-Host", "X-Original-Host"} {
@@ -136,17 +143,40 @@ func (c *Config) ServiceName(r *http.Request) string {
 				return jitcore.CanonServerName(strings.TrimSpace(v))
 			}
 		}
+		if h := originalURLHost(r); h != "" {
+			return jitcore.CanonServerName(h)
+		}
 	}
 	return jitcore.CanonServerName(r.Host)
+}
+
+// originalURLHost pulls the host out of an absolute X-Original-URL.
+func originalURLHost(r *http.Request) string {
+	v := r.Header.Get("X-Original-URL")
+	if v == "" {
+		return ""
+	}
+	u, err := url.Parse(v)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Host
 }
 
 // OriginalURI is the path the client actually requested, which on a forward-auth
 // subrequest is not this request's own path.
 func OriginalURI(r *http.Request) string {
-	for _, h := range []string{"X-Forwarded-Uri", "X-Original-Uri", "X-Original-URL"} {
+	for _, h := range []string{"X-Forwarded-Uri", "X-Original-Uri"} {
 		if v := r.Header.Get(h); v != "" {
 			return v
 		}
+	}
+	// ingress-nginx sends an ABSOLUTE url here, so take just the path.
+	if v := r.Header.Get("X-Original-URL"); v != "" {
+		if u, err := url.Parse(v); err == nil && u.Path != "" {
+			return u.Path
+		}
+		return v
 	}
 	return r.URL.Path
 }

@@ -507,3 +507,36 @@ func TestRateLimitOnKnockEndpoints(t *testing.T) {
 		t.Errorf("allowed %d challenges, limit was 3", codes[http.StatusNoContent])
 	}
 }
+
+// ingress-nginx sends its auth subrequest with Host set to the AUTH service's
+// address and the real origin only inside X-Original-URL. Without honouring
+// that header every Kubernetes deployment resolves to the wrong service name
+// and denies everything — found by running the real thing under kind.
+func TestIngressNginxOriginalURL(t *testing.T) {
+	s := testServer(t, nil)
+
+	// knock the normal way (proxied request carries the real Host)
+	if w := knock(t, s, svcA, proxyIP, nil, testKid, secretBytes(t)); w.Code != http.StatusNoContent {
+		t.Fatalf("knock: got %d", w.Code)
+	}
+
+	// ...then authorize the way ingress-nginx does it
+	r := req(http.MethodGet, "jit-authorizer.jit-system.svc.cluster.local", "/authz", proxyIP, map[string]string{
+		"X-Original-URL":    "https://" + svcA + "/dashboard?x=1",
+		"X-Original-Method": "GET",
+		"X-Forwarded-For":   "203.0.113.5",
+	}, nil)
+	// the knock above came from the proxy peer with no XFF, so key on the same
+	r.Header.Del("X-Forwarded-For")
+	if w := do(s, r); w.Code != http.StatusNoContent {
+		t.Errorf("ingress-nginx style authz: got %d want 204 (X-Original-URL not honoured?)", w.Code)
+	}
+
+	// and the protocol endpoints must still be recognised through X-Original-URL
+	r2 := req(http.MethodGet, "jit-authorizer.jit-system.svc.cluster.local", "/authz", proxyIP, map[string]string{
+		"X-Original-URL": "https://" + svcA + s.config().URIPrefix + "/challenge",
+	}, nil)
+	if w := do(s, r2); w.Code != http.StatusNoContent {
+		t.Errorf("protocol endpoint via X-Original-URL: got %d want 204", w.Code)
+	}
+}

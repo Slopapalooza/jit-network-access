@@ -4,6 +4,11 @@ iconPath: ""
 summary: Keep a service dark until a paired browser extension answers a time-based challenge. A valid knock creates a temporary, self-expiring allow entry for that client.
 import: github.com/Slopapalooza/jit-network-access/adapters/traefik/plugin
 
+# Traefik derives the Go symbol it evaluates from the LAST element of `import`
+# (here "plugin") unless basePkg says otherwise. Our package is `jitaccess`, so
+# without this Traefik fails to load with: "failed to eval New: undefined: plugin".
+basePkg: jitaccess
+
 testData:
   allow:
     - kid_demo
