@@ -1,0 +1,46 @@
+# JIT Network Access — native Caddy module
+#
+# Build a Caddy with the handler compiled in:
+#   xcaddy build --with github.com/Slopapalooza/jit-network-access/adapters/caddy
+# or, from this directory, with no extra tooling:
+#   go build -o caddy-jit ./cmd/caddy-jit
+
+app.example.com {
+	jit_access {
+		# One line per enrolled device. The secret is base64url of >=16 random
+		# bytes:  openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
+		token kid_REPLACE REPLACE-base64url-secret ops laptop
+
+		# Which kids may open THIS site. Use * for any registered token.
+		allow kid_REPLACE
+
+		# --- everything below is optional; these are the defaults ---
+		# prefix       /.well-known/jit-access
+		# grant_ttl    1h
+		# nonce_ttl    60s
+		# enroll_ttl   24h
+		# failure_mode interstitial      # or: stealth  (generic 404)
+		# binding      ip                # or: ip+cookie (device-bound)
+		# ipv6_prefix  128
+		# rate_limit   10                # knock attempts per minute per IP
+
+		# Only enable behind a correctly configured trusted_proxies — it keys
+		# grants on the resolved client IP instead of the un-forgeable TCP peer.
+		# trust_forwarded
+	}
+
+	reverse_proxy localhost:3000
+}
+
+# Shared-egress example: office NAT or VPN, where an IP alone is too coarse.
+# ip+cookie additionally binds the grant to the browser that knocked.
+intranet.example.com {
+	jit_access {
+		token kid_REPLACE REPLACE-base64url-secret ops laptop
+		allow *
+		binding ip+cookie
+		failure_mode stealth
+		grant_ttl 8h
+	}
+	reverse_proxy localhost:3001
+}

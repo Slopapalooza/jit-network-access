@@ -33,10 +33,12 @@ docs/PROTOCOL.md          L1 — the wire protocol (vendor-neutral, versioned)
 core/SPEC.md              L3 — GrantStore/NonceStore/TokenRegistry contract, canonicalization, crypto
 core/testdata/           shared conformance vectors + the Python generator that produces them
 core/lua/jitaccess/core/ L3 reference lib in Lua (BunkerWeb/OpenResty adapters vendor this)
-core/go/                 L3 reference lib in Go (standalone Authorizer) — later
+core/go/                 L3 reference lib in Go (Authorizer + Caddy module); passes the shared vectors
 adapters/bunkerweb/      L4 flagship: native BunkerWeb plugin
-adapters/{nginx,traefik,caddy,envoy}/   L4 recipes / native module — later
-authorizer/              standalone Go daemon (single binary, in-process state) — later
+adapters/caddy/           L4 native Caddy module (jit_access) — in-process, no sidecar
+adapters/{nginx,traefik}/ L4 forward-auth recipes for the standalone Authorizer
+adapters/envoy/           L4 ext_authz recipe — later
+authorizer/              standalone Go daemon (single binary, in-process state)
 extension/               Chromium MV3 extension
 test/conformance/        black-box functional + security suites
 test/harness/            docker-compose stacks for real end-to-end runs
@@ -54,14 +56,14 @@ Roadmap lives in [`DESIGN.md` §9](DESIGN.md). Current increment:
 - [x] **M2.5** — security conformance suite (`test/conformance/security_suite.py`), **12/12 green on real BunkerWeb**. Probes: malformed `/respond` (never opens the gate), tampered proof/nonce, cross-service proof isolation, replay, unknown-kid no-oracle, forged `X-Forwarded-For`/`X-Real-IP`, path traversal. **This suite caught a real vulnerability** on the test server (`USE_REAL_IP` with broad RFC1918 trust let a forged XFF inherit another IP's grant — SECURITY-REVIEW C2/R2); fixed by keying on the un-forgeable TCP peer (`$realip_remote_addr`), with `JIT_ACCESS_TRUST_REALIP` as the Hardened opt-in.
 - [x] **M3** — Chromium MV3 extension (`extension/`): silent knock on top-level navigation to enrolled origins, enrollment (non-extractable WebCrypto key), popup status. Its WebCrypto reproduces the shared vectors byte-for-byte (proof identical to the Python client and Lua server — 3-language interop). Security rules from §11 R6 baked in (frame-scoped knocks, locked `externally_connectable`, worker-derived origin, no proof across the message boundary, exact-origin, HTTPS-only). MV3 browser plumbing is manual-test (load unpacked); crypto + knock logic are validated.
 - [x] **M4** — admin UX. One-time-code enrollment (`POST /enroll` exchanges a single-use code for the secret via headers — **validated 5/5 on real BunkerWeb**: mint → exchange → single-use → knock with the enrolled secret unlocks), extension code-exchange enrollment, `bwcli jitaccess token`, UI metrics page (`ui/actions.py`), and the Simple quickstart + plugin-ordering guidance in `adapters/bunkerweb/README.md`.
-- [ ] **M5** — standalone Authorizer + native Caddy module (Simple, no Redis)
+- [x] **M5** — **portability proved: one token, three engines.** `core/go` reproduces all 29 shared vectors byte-for-byte (`go test ./core/go`), so Go and Lua compute identical proofs and identical grant keys. Built on it: the **standalone Authorizer** (single static binary — protocol endpoints, forward-auth `/authz`, admin API, in-process state, no Redis) and a **native Caddy module** (`jit_access`, in-process, no extra hop). **Exit test run locally:** the same kid+secret and the same knock client unlock a site behind the Caddy module (dark 403 → knock 204 → content 200 → replay 403) *and* a service behind the Authorizer (403 → knock 204 → authz 204) — and that same client is what validated the BunkerWeb/Lua plugin on a live instance. Plain-NGINX (`auth_request`) and Traefik (`forwardAuth`) recipes included.
 - [ ] **M6** — Hardened profile (Redis, cookie, stealth, KEK, v3 keys) + more adapters
 
 ### What is machine-verified in this repo vs. not
 
 This project is being developed on a host **without Lua or Docker**. Therefore:
 
-- **Verified here:** the conformance vectors are produced by the Python reference implementation (`core/testdata/generate_vectors.py`) and cross-checked with `openssl`; the crypto constructions (PAE, canonicalization, HMAC proof, nonce) are additionally reproduced by independent Node ports of the Lua algorithms. Non-Lua artifacts are linted (compose YAML, bash `-n`, plugin.json, the registry job's self-test) and the plugin vendor/packaging step is exercised.
+- **Verified here:** the conformance vectors are produced by the Python reference implementation (`core/testdata/generate_vectors.py`) and cross-checked with `openssl`; the crypto constructions (PAE, canonicalization, HMAC proof, nonce) are additionally reproduced by independent Node ports of the Lua algorithms. **The Go stack is fully executable on this host** — `core/go` (14 tests, all 29 vectors), the Authorizer (19 tests incl. forged-XFF, direct-exposure, replay, cross-service proof isolation, kid-existence oracle, malformed-`/respond` fuzz) and the Caddy module (13 tests) all run under `go test`, and both binaries were driven end-to-end by the Python knock client. Non-Lua artifacts are linted (compose YAML, bash `-n`, plugin.json, the registry job's self-test) and the plugin vendor/packaging step is exercised.
 - **Not yet run here:** the Lua core and the BunkerWeb plugin cannot be executed locally (no Lua/Docker) — they are written to match the vectors and validated by the docker harness (`test/harness/`) on a Docker-capable Linux host. Treat them as reviewed-but-not-yet-executed until the harness is run; if an M1 assertion fails, the likely suspects are BunkerWeb-integration details (the `api()` response envelope, internal-API host/whitelist, plugin ordering), not the crypto core.
 
 ## Status of the concept
