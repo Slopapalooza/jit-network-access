@@ -1,6 +1,6 @@
 {
   "name": "jit-network-access-extension",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "Chromium MV3 extension: silently answers the JIT Network Access knock so protected origins open transparently.",

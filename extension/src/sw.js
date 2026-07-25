@@ -46,8 +46,14 @@ async function knock(origin) {
     const proof = await buildProof(key, host, token.kid, b64uDecode(nonceB64));
 
     // 3. respond
+    //
+    // credentials MUST be "include" here, unlike the challenge above: with
+    // ip+cookie binding the server answers a successful knock with a Set-Cookie
+    // carrying the opaque grant id, and the browser only stores it when the
+    // request was credentialed. With "omit" the cookie is silently dropped, the
+    // grant can never be satisfied, and the page re-knocks forever.
     const rr = await fetch(origin + PREFIX + "/respond", {
-      method: "POST", cache: "no-store", credentials: "omit",
+      method: "POST", cache: "no-store", credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ v: 1, kid: token.kid, nonce: nonceB64, proof }),
     });
