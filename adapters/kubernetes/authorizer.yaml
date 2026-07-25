@@ -1,0 +1,116 @@
+# JIT Network Access — Authorizer for ingress-nginx.
+#
+# ClusterIP only, on purpose: /authz and /admin/* must never be routable from
+# outside the cluster. Do NOT add an Ingress for this Service.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jit-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jit-authorizer-config
+  namespace: jit-system
+type: Opaque
+stringData:
+  # The whole Authorizer config. Device secrets live here, so it is a Secret
+  # rather than a ConfigMap — restrict it with RBAC and consider a sealed/
+  # external secret in production.
+  config.json: |
+    {
+      "listen": "0.0.0.0:8998",
+      "admin_token": "CHANGE-ME-openssl-rand-base64-32",
+
+      "trusted_proxies": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
+      "real_ip_header": "X-Forwarded-For",
+
+      "grant_ttl": 3600,
+      "nonce_ttl": 60,
+      "enroll_ttl": 86400,
+      "ipv6_prefix": 128,
+      "rate_limit_per_min": 10,
+
+      "services": {
+        "app.example.com": {
+          "tokens": ["kid_REPLACE"],
+          "failure_mode": "interstitial",
+          "binding": "ip"
+        }
+      },
+
+      "tokens": [
+        {
+          "kid": "kid_REPLACE",
+          "secret": "REPLACE-base64url-of-32-random-bytes",
+          "label": "ops laptop"
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jit-authorizer
+  namespace: jit-system
+  labels: { app: jit-authorizer }
+spec:
+  # Grants are in-process. More than one replica means a client knocking on pod
+  # A is not admitted by pod B — keep this at 1 until the Hardened shared
+  # backend lands, or pin sessions to a pod.
+  replicas: 1
+  selector:
+    matchLabels: { app: jit-authorizer }
+  template:
+    metadata:
+      labels: { app: jit-authorizer }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+      containers:
+        - name: authorizer
+          # Build with: docker build -t <registry>/jitaccess-authorizer:0.1.0 authorizer/
+          image: ghcr.io/REPLACE/jitaccess-authorizer:0.1.0
+          args: ["-config", "/etc/jitaccess/config.json"]
+          ports:
+            - name: http
+              containerPort: 8998
+          volumeMounts:
+            - name: config
+              mountPath: /etc/jitaccess
+              readOnly: true
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: config
+          secret:
+            secretName: jit-authorizer-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jit-authorizer
+  namespace: jit-system
+spec:
+  type: ClusterIP
+  selector: { app: jit-authorizer }
+  ports:
+    - name: http
+      port: 8998
+      targetPort: http
