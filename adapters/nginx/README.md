@@ -1,7 +1,8 @@
 # JIT Network Access — plain NGINX recipe
 
 NGINX has no plugin here: it delegates to the [standalone
-Authorizer](../../authorizer) over `auth_request`. Copy
+Authorizer](../../authorizer) over `auth_request`
+(see [How it works](../../docs/how-it-works.md) for the protocol in diagrams). Copy
 [`jitaccess.conf`](jitaccess.conf) into your server block.
 
 ```

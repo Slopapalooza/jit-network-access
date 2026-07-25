@@ -8,6 +8,8 @@ It embeds [`core/go`](../core/go), so the wire protocol, the canonical grant
 keys, and the crypto are the same code path the BunkerWeb plugin runs. The same
 extension and the *same enrolled token* work against either engine.
 
+See [How it works](../docs/how-it-works.md) for the protocol in diagrams.
+
 **Simple profile: all state is in-process.** No Redis, no database, no external
 service. One binary, one JSON config file.
 

@@ -7,7 +7,10 @@ their browser is enrolled.
 
 This guide covers installing the extension, enrolling a device, and day‑to‑day
 use. For issuing tokens and enrollment links, see the
-[BunkerWeb plugin guide](bunkerweb-plugin-guide.md).
+[BunkerWeb plugin guide](bunkerweb-plugin-guide.md); for what the extension is
+actually doing behind the scenes, see
+[the knock handshake](how-it-works.md#2-the-knock-handshake) — one diagram
+explains it better than a page of prose.
 
 > Screenshots below use `app.example.com` and placeholder token IDs in place of
 > real hostnames.
