@@ -2,6 +2,8 @@
 
 Make self-hosted services **dark by default**. A service behind a supported edge server (BunkerWeb first; Caddy/NGINX/Traefik/Envoy via a portable Authorizer) is unreachable until a paired Chromium extension silently answers a time-based challenge ("knock"). A valid knock creates a **temporary allow entry** for that client and that service, which expires on its own. It's Single Packet Authorization (fwknop-style) re-imagined for HTTPS and the browser.
 
+**Start here:** [`docs/how-it-works.md`](docs/how-it-works.md) — the whole system in diagrams
+
 **Usage guides (with screenshots):**
 - **BunkerWeb plugin (admin):** [`docs/bunkerweb-plugin-guide.md`](docs/bunkerweb-plugin-guide.md) — enable the gate, issue tokens, hand out enrollment links
 - **Chrome extension (device):** [`docs/chrome-extension-guide.md`](docs/chrome-extension-guide.md) — install, enroll, day-to-day use
