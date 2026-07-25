@@ -1,0 +1,27 @@
+http:
+  middlewares:
+    jit:
+      plugin:
+        jitaccess:
+          allow:
+            - kid_lab
+          tokens:
+            - kid: kid_lab
+              secret: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE
+              label: lab device
+          binding: ip
+          failureMode: interstitial
+          grantTtl: 3600
+
+  routers:
+    app:
+      rule: "Host(`app.example.com`)"
+      entryPoints: [web]
+      middlewares: [jit]
+      service: upstream
+
+  services:
+    upstream:
+      loadBalancer:
+        servers:
+          - url: "http://upstream:8080"

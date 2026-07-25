@@ -89,6 +89,25 @@ The Service is deliberately `ClusterIP` with no Ingress of its own: `/authz` and
 refuses those paths from any peer outside `trusted_proxies`, but not being
 routable is the real control.
 
+## Known difference: no `X-JIT-Access` marker on denials
+
+Every other engine answers a denied request with the interstitial **and** an
+`X-JIT-Access: challenge; v=1` header, which the extension can detect to trigger
+a knock. `ingress-nginx` answers a failed `auth_request` with **its own** error
+page and does not proxy the auth service's response headers, so that marker does
+not reach the browser.
+
+This does not stop enrolled devices working: the extension knocks *proactively*
+on navigation to an enrolled origin, which is the normal path. What you lose is
+the marker-driven **recovery** path (notice a deny → knock → reload). If you want
+it, forward the Authorizer's response with `custom-http-errors` plus a default
+backend — most deployments do not need to.
+
+Verified in [`test/harness/adapters`](../../test/harness/adapters): the
+Kubernetes gate passes dark-before-knock, knock-accepted, service-opens and
+replay-rejected, and reports this marker difference explicitly rather than
+silently.
+
 ## Annotations reference
 
 | Annotation | Purpose |

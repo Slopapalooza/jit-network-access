@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# JIT Network Access - Copyright (C) 2026 Slopapalooza
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Stand up a single-node kind cluster with ingress-nginx and gate a service
+# behind the Authorizer, exactly as adapters/kubernetes/ documents.
+#
+#   ./setup.sh            # create cluster + deploy
+#   ./setup.sh --destroy  # tear it all down
+#
+# The ingress is published on host port 8085 so ../run-k8s.sh can knock it with
+# the same client and token as every other engine.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo="$(cd "$here/../../../.." && pwd)"
+CLUSTER=jit-lab
+DOCKER="${DOCKER:-sudo docker}"
+KIND="${KIND:-sudo kind}"
+KUBECTL="${KUBECTL:-sudo kubectl}"
+
+if [ "${1:-}" = "--destroy" ]; then
+  $KIND delete cluster --name "$CLUSTER"
+  exit 0
+fi
+
+echo "==> building the Authorizer image"
+$DOCKER build -q -t jitaccess-authorizer:lab -f "$repo/authorizer/Dockerfile" "$repo"
+
+echo "==> creating kind cluster '$CLUSTER'"
+if $KIND get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
+  echo "    already exists, reusing"
+else
+  $KIND create cluster --config "$here/kind-config.yaml" --wait 120s
+fi
+
+echo "==> loading the Authorizer image into the cluster (never pulled)"
+$KIND load docker-image jitaccess-authorizer:lab --name "$CLUSTER"
+
+echo "==> installing ingress-nginx"
+$KUBECTL apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+echo "    waiting for the controller to be ready (this is the slow part)"
+$KUBECTL wait --namespace ingress-nginx \
+  --for=condition=ready pod \
+  --selector=app.kubernetes.io/component=controller \
+  --timeout=300s
+
+echo "==> deploying the Authorizer, the protected service and both Ingresses"
+$KUBECTL apply -f "$here/lab-manifests.yaml"
+$KUBECTL -n jit-system rollout status deploy/jit-authorizer --timeout=180s
+$KUBECTL -n default    rollout status deploy/upstream       --timeout=180s
+
+echo
+echo "ready — the gated service is on http://app.example.com:8085"
+echo "  curl --resolve app.example.com:8085:127.0.0.1 http://app.example.com:8085/"

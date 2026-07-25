@@ -11,7 +11,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: app-jit-protocol
-  namespace: default
+  namespace: jit-system          # same namespace as the Authorizer Service
   annotations:
     # deliberately NO auth-url here
     nginx.ingress.kubernetes.io/proxy-body-size: 8k
@@ -25,25 +25,12 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: jit-authorizer-proxy
+                name: jit-authorizer
                 port:
                   number: 8998
   tls:
     - hosts: [app.example.com]
       secretName: app-example-com-tls
----
-# ExternalName into the jit-system namespace, since an Ingress backend must live
-# in the same namespace as the Ingress.
-apiVersion: v1
-kind: Service
-metadata:
-  name: jit-authorizer-proxy
-  namespace: default
-spec:
-  type: ExternalName
-  externalName: jit-authorizer.jit-system.svc.cluster.local
-  ports:
-    - port: 8998
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress

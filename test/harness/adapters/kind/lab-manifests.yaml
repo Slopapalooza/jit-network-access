@@ -1,0 +1,116 @@
+# The lab equivalent of adapters/kubernetes/*.yaml: Authorizer + a protected
+# service + the two Ingresses (one gated, one ungated for the knock endpoints).
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: jit-system }
+---
+apiVersion: v1
+kind: Secret
+metadata: { name: jit-authorizer-config, namespace: jit-system }
+type: Opaque
+stringData:
+  config.json: |
+    {
+      "listen": "0.0.0.0:8998",
+      "admin_token": "lab-admin-token",
+      "trusted_proxies": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8"],
+      "grant_ttl": 3600,
+      "services": {
+        "app.example.com": { "tokens": ["kid_lab"], "failure_mode": "interstitial", "binding": "ip" }
+      },
+      "tokens": [
+        { "kid": "kid_lab", "secret": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE", "label": "lab device" }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: jit-authorizer, namespace: jit-system, labels: { app: jit-authorizer } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: jit-authorizer } }
+  template:
+    metadata: { labels: { app: jit-authorizer } }
+    spec:
+      containers:
+        - name: authorizer
+          image: jitaccess-authorizer:lab
+          imagePullPolicy: Never          # loaded into kind, never pulled
+          args: ["-config", "/etc/jitaccess/config.json"]
+          ports: [{ name: http, containerPort: 8998 }]
+          volumeMounts:
+            - { name: config, mountPath: /etc/jitaccess, readOnly: true }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+      volumes:
+        - name: config
+          secret: { secretName: jit-authorizer-config }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: jit-authorizer, namespace: jit-system }
+spec:
+  selector: { app: jit-authorizer }
+  ports: [{ name: http, port: 8998, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: upstream, namespace: default, labels: { app: upstream } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: upstream } }
+  template:
+    metadata: { labels: { app: upstream } }
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami
+          args: ["--port=8080", "--name=protected-upstream"]
+          ports: [{ name: http, containerPort: 8080 }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: upstream, namespace: default }
+spec:
+  selector: { app: upstream }
+  ports: [{ name: http, port: 80, targetPort: http }]
+---
+# 1. knock endpoints — NO auth annotation, or a dark service could never be
+#    knocked into. This Ingress lives in jit-system so it can name the
+#    Authorizer Service directly: an ExternalName pointing at a
+#    *.svc.cluster.local name is resolved by the controller's own resolver and
+#    can silently land on a PUBLIC address if that name doesn't resolve there.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: { name: app-jit-protocol, namespace: jit-system }
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /.well-known/jit-access/
+            pathType: Prefix
+            backend: { service: { name: jit-authorizer, port: { number: 8998 } } }
+---
+# 2. the gated site
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/auth-url: "http://jit-authorizer.jit-system.svc.cluster.local:8998/authz"
+    nginx.ingress.kubernetes.io/auth-response-headers: "Set-Cookie, X-JIT-Kid"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: upstream, port: { number: 80 } } }
