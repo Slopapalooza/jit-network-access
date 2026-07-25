@@ -1,4 +1,18 @@
-# JIT Network Access — Traefik recipe
+# JIT Network Access — Traefik
+
+Two ways to gate Traefik. **Prefer the native plugin** unless you need one
+Authorizer shared across several proxies.
+
+| | [Native plugin](plugin) | forwardAuth recipe (this page) |
+|---|---|---|
+| Extra process | none — runs inside Traefik | an Authorizer container |
+| Client IP | the real TCP peer, directly | a header from Traefik, needs `trusted_proxies` |
+| Protocol endpoints | served by the middleware | need their own ungated router |
+| Shared across proxies | no | yes — one Authorizer, many front-ends |
+
+---
+
+## forwardAuth recipe
 
 Traefik delegates to the [standalone Authorizer](../../authorizer) via a
 `forwardAuth` middleware. Two pieces of config: the middleware, and a router

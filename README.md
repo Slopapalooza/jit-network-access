@@ -38,7 +38,10 @@ core/lua/jitaccess/core/ L3 reference lib in Lua (BunkerWeb/OpenResty adapters v
 core/go/                 L3 reference lib in Go (Authorizer + Caddy module); passes the shared vectors
 adapters/bunkerweb/      L4 flagship: native BunkerWeb plugin
 adapters/caddy/           L4 native Caddy module (jit_access) — in-process, no sidecar
-adapters/{nginx,traefik}/ L4 forward-auth recipes for the standalone Authorizer
+adapters/traefik/          L4 native Traefik plugin (Yaegi) + forwardAuth recipe
+adapters/openresty/        L4 native OpenResty gate (embeds core/lua)
+adapters/kubernetes/       L4 ingress-nginx manifests + the client-IP caveat
+adapters/nginx/            L4 auth_request recipe for the standalone Authorizer
 adapters/envoy/           L4 ext_authz recipe — later
 authorizer/              standalone Go daemon (single binary, in-process state)
 extension/               Chromium MV3 extension

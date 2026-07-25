@@ -1,0 +1,16 @@
+displayName: JIT Network Access
+type: middleware
+iconPath: ""
+summary: Keep a service dark until a paired browser extension answers a time-based challenge. A valid knock creates a temporary, self-expiring allow entry for that client.
+import: github.com/Slopapalooza/jit-network-access/adapters/traefik/plugin
+
+testData:
+  allow:
+    - kid_demo
+  tokens:
+    - kid: kid_demo
+      secret: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE
+      label: demo device
+  binding: ip
+  failureMode: interstitial
+  grantTtl: 3600
