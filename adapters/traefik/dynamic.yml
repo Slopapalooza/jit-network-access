@@ -1,0 +1,42 @@
+# JIT Network Access for Traefik (file provider).
+# The Authorizer runs on an internal network as "authorizer:8998".
+
+http:
+  middlewares:
+    jit-access:
+      forwardAuth:
+        address: "http://authorizer:8998/authz"
+        # Set-Cookie is required for `binding: ip+cookie` (it carries the grant
+        # id back to the browser); the others are informational for your app.
+        authResponseHeaders:
+          - "Set-Cookie"
+          - "X-JIT-Kid"
+
+  routers:
+    # 1. The protocol endpoints: higher priority, and deliberately WITHOUT the
+    #    jit-access middleware, so a device that is not yet granted can knock.
+    app-jit-protocol:
+      rule: "Host(`app.example.com`) && PathPrefix(`/.well-known/jit-access/`)"
+      priority: 1000
+      service: jit-authorizer
+      entryPoints: ["websecure"]
+      tls: {}
+
+    # 2. The protected site.
+    app:
+      rule: "Host(`app.example.com`)"
+      priority: 100
+      service: app-backend
+      middlewares: ["jit-access"]
+      entryPoints: ["websecure"]
+      tls: {}
+
+  services:
+    jit-authorizer:
+      loadBalancer:
+        servers:
+          - url: "http://authorizer:8998"
+    app-backend:
+      loadBalancer:
+        servers:
+          - url: "http://app:3000"
