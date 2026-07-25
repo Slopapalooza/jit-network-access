@@ -14,9 +14,8 @@
 -- Fail-closed is the invariant (SECURITY-REVIEW C1 / DESIGN §11 R1): access()
 -- wraps everything in its own pcall and denies on any internal error.
 --
--- Verified end-to-end on BunkerWeb 1.6.10 and re-verified on 1.6.13 (current);
--- core crypto runs under the bundled LuaJIT + resty.openssl and matches
--- core/testdata/vectors.json.
+-- Verified end-to-end on BunkerWeb 1.6.13; core crypto runs under the bundled
+-- LuaJIT + resty.openssl and matches core/testdata/vectors.json.
 
 local class    = require "middleclass"
 local plugin   = require "bunkerweb.plugin"

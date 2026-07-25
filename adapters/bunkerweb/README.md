@@ -29,10 +29,9 @@ volume, or set `EXTERNAL_PLUGIN_URLS=file:///path/to/jitaccess.tar.gz`.
 ## Status
 
 Access phase (M1/M2), knock protocol + one-time-code `/enroll` (M2/M4), and the
-security suite (M2.5) are implemented and **validated on real BunkerWeb** — the
-milestone matrices on 1.6.10, and the plugin is **currently running and
-re-verified on 1.6.13** (loads cleanly, full knock and `ip+cookie` enforcement
-12/12 from a clean vantage).
+security suite (M2.5) are implemented and **validated on real BunkerWeb 1.6.13**
+(loads cleanly, full knock and `ip+cookie` enforcement 12/12 from a clean
+vantage).
 The plugin embeds the vector-verified core. The **UI page** (Plugins → **JIT
 Access**) is a full token manager: it lists tokens, creates them against a
 checkbox list of your JIT-enabled services, **regenerates** (device replaced) and
