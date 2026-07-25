@@ -1,0 +1,37 @@
+{
+  "listen": "127.0.0.1:8998",
+  "admin_token": "CHANGE-ME-generate-with-openssl-rand-base64-32",
+
+  "trusted_proxies": ["127.0.0.0/8", "::1/128"],
+  "real_ip_header": "X-Forwarded-For",
+
+  "uri_prefix": "/.well-known/jit-access",
+  "grant_ttl": 3600,
+  "nonce_ttl": 60,
+  "enroll_ttl": 86400,
+  "ipv6_prefix": 128,
+  "rate_limit_per_min": 10,
+
+  "services": {
+    "app.example.com": {
+      "tokens": ["kid_REPLACE"],
+      "failure_mode": "interstitial",
+      "binding": "ip"
+    },
+    "intranet.example.com": {
+      "tokens": ["*"],
+      "failure_mode": "stealth",
+      "binding": "ip+cookie",
+      "grant_ttl": 28800
+    }
+  },
+
+  "tokens": [
+    {
+      "kid": "kid_REPLACE",
+      "secret": "REPLACE-with-base64url-of-32-random-bytes",
+      "label": "ops laptop",
+      "expires": 0
+    }
+  ]
+}
