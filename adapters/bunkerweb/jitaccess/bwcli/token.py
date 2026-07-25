@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# JIT Network Access - Copyright (C) 2026 Slopapalooza
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """
 bwcli jitaccess token [label...] - generate a JIT Access device token.
 

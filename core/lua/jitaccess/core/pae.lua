@@ -1,3 +1,6 @@
+-- JIT Network Access - Copyright (C) 2026 Slopapalooza
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+
 -- jitaccess.core.pae — Pre-Authentication Encoding (PASETO-compatible)
 --
 -- LE64(n)    = 8-byte little-endian of n, top bit of the last byte cleared

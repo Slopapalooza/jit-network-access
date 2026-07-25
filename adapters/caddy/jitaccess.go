@@ -1,3 +1,6 @@
+// JIT Network Access - Copyright (C) 2026 Slopapalooza
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Package jitaccess is a native Caddy HTTP handler that gates a site behind the
 // JIT Network Access knock — the no-extra-process path for Caddy (DESIGN §3.1).
 //

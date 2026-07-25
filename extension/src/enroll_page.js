@@ -1,3 +1,6 @@
+// JIT Network Access - Copyright (C) 2026 Slopapalooza
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Confirm page reached via a registration URL (the service worker redirects here
 // when the user lands on <host>/.well-known/jit-access/register?code=...).
 // One click grants permission for the site(s) and pulls the token.

@@ -1,3 +1,6 @@
+// JIT Network Access - Copyright (C) 2026 Slopapalooza
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Shared enrollment logic used by the options page (paste a setup string) and
 // the confirm page (arrive via a registration URL). Both end at enrollToken().
 

@@ -1,3 +1,6 @@
+# JIT Network Access - Copyright (C) 2026 Slopapalooza
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # BunkerWeb UI integration for jitaccess: token lifecycle + site picker.
 #
 #   pre_render()  -> metric cards + the token list + the JIT-enabled service list

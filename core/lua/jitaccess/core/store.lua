@@ -1,3 +1,6 @@
+-- JIT Network Access - Copyright (C) 2026 Slopapalooza
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+
 -- jitaccess.core.store — GrantStore + NonceStore (core/SPEC.md §4, §5)
 --
 -- Simple/default backend: ngx.shared dicts (process-local, worker-shared, no

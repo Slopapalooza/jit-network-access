@@ -1,3 +1,6 @@
+// JIT Network Access - Copyright (C) 2026 Slopapalooza
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Validate the extension's WebCrypto against the shared conformance vectors.
 // Run: node src/jitcrypto.test.mjs   (from the extension/ dir)
 import { readFileSync } from "node:fs";

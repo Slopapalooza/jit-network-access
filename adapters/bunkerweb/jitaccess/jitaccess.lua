@@ -1,3 +1,6 @@
+-- JIT Network Access - Copyright (C) 2026 Slopapalooza
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+
 -- jitaccess.lua — BunkerWeb plugin main (adapter L4).
 --
 -- M2: the challenge/respond knock protocol on top of the M1 gate.

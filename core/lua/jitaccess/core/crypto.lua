@@ -1,3 +1,6 @@
+-- JIT Network Access - Copyright (C) 2026 Slopapalooza
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+
 -- jitaccess.core.crypto — proof & nonce cryptography (docs/PROTOCOL.md §3, §5)
 --
 -- Depends on lua-resty-openssl (bundled with BunkerWeb/OpenResty) for HMAC-SHA256
