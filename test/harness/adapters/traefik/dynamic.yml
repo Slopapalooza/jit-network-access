@@ -12,12 +12,30 @@ http:
           binding: ip
           failureMode: interstitial
           grantTtl: 3600
+    # Same gate, stealth failure mode - see the Caddyfile comment.
+    jit-stealth:
+      plugin:
+        jitaccess:
+          allow:
+            - kid_lab
+          tokens:
+            - kid: kid_lab
+              secret: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE
+              label: lab device
+          binding: ip
+          failureMode: stealth
+          grantTtl: 3600
 
   routers:
     app:
       rule: "Host(`app.example.com`)"
       entryPoints: [web]
       middlewares: [jit]
+      service: upstream
+    stealth:
+      rule: "Host(`stealth.example.com`)"
+      entryPoints: [web]
+      middlewares: [jit-stealth]
       service: upstream
 
   services:

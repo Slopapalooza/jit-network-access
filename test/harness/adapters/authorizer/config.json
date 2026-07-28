@@ -1,12 +1,34 @@
 {
   "listen": "0.0.0.0:8998",
   "admin_token": "lab-admin-token",
-  "trusted_proxies": ["172.16.0.0/12", "10.0.0.0/8", "192.168.0.0/16", "127.0.0.0/8"],
+  "trusted_proxies": [
+    "172.16.0.0/12",
+    "10.0.0.0/8",
+    "192.168.0.0/16",
+    "127.0.0.0/8"
+  ],
   "grant_ttl": 3600,
   "services": {
-    "app.example.com": { "tokens": ["kid_lab"], "failure_mode": "interstitial", "binding": "ip" }
+    "app.example.com": {
+      "tokens": [
+        "kid_lab"
+      ],
+      "failure_mode": "interstitial",
+      "binding": "ip"
+    },
+    "stealth.example.com": {
+      "tokens": [
+        "kid_lab"
+      ],
+      "failure_mode": "stealth",
+      "binding": "ip"
+    }
   },
   "tokens": [
-    { "kid": "kid_lab", "secret": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE", "label": "lab device" }
+    {
+      "kid": "kid_lab",
+      "secret": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      "label": "lab device"
+    }
   ]
 }

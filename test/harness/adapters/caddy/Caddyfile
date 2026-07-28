@@ -3,10 +3,24 @@
 	auto_https off
 }
 
-:80 {
+http://app.example.com {
 	jit_access {
 		token kid_lab AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE lab device
 		allow kid_lab
+		grant_ttl 1h
+	}
+	reverse_proxy upstream:8080
+}
+
+# Same gate, stealth failure mode. The lab pinned interstitial on every engine,
+# so the generic-reply path — where a wrong method, a throttled request and a
+# no-grant request must all be indistinguishable from an unrouted 404 — was
+# exercised by no live-stack test at all.
+http://stealth.example.com {
+	jit_access {
+		token kid_lab AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE lab device
+		allow kid_lab
+		failure_mode stealth
 		grant_ttl 1h
 	}
 	reverse_proxy upstream:8080

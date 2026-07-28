@@ -341,6 +341,8 @@ func (j *JITAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			j.respond(w, r, service, ip)
 		case r.URL.Path == p+"/enroll" && r.Method == http.MethodPost:
 			j.enroll(w, r, ip)
+		case r.URL.Path == p+"/register" && r.Method == http.MethodGet:
+			j.register(w)
 		default:
 			j.deny(w) // any other path under the prefix stays dark
 		}
@@ -468,6 +470,17 @@ func (j *JITAccess) respond(w http.ResponseWriter, r *http.Request, service, ip 
 
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// register answers a registration link for a browser WITHOUT the extension; an
+// installed one intercepts that navigation client-side and never reaches here.
+// Identical for any code value, so it is no enrollment-code oracle.
+func (j *JITAccess) register(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer") // the URL carries a single-use code
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(jitcore.RegisterHTML)
 }
 
 func (j *JITAccess) enroll(w http.ResponseWriter, r *http.Request, ip string) {

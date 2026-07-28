@@ -18,7 +18,7 @@ mkdir -p "$plugin/core"
 cp "$src"/*.lua "$plugin/core/"
 
 # sanity: required modules present
-for m in pae canon crypto registry store; do
+for m in pae canon crypto registry store pages; do
   test -f "$plugin/core/$m.lua" || { echo "missing core module: $m"; exit 1; }
 done
 

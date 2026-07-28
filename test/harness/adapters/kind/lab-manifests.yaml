@@ -17,7 +17,8 @@ stringData:
       "trusted_proxies": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8"],
       "grant_ttl": 3600,
       "services": {
-        "app.example.com": { "tokens": ["kid_lab"], "failure_mode": "interstitial", "binding": "ip" }
+        "app.example.com": { "tokens": ["kid_lab"], "failure_mode": "interstitial", "binding": "ip" },
+        "stealth.example.com": { "tokens": ["kid_lab"], "failure_mode": "stealth", "binding": "ip" }
       },
       "tokens": [
         { "kid": "kid_lab", "secret": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE", "label": "lab device" }
@@ -95,6 +96,12 @@ spec:
           - path: /.well-known/jit-access/
             pathType: Prefix
             backend: { service: { name: jit-authorizer, port: { number: 8998 } } }
+    - host: stealth.example.com
+      http:
+        paths:
+          - path: /.well-known/jit-access/
+            pathType: Prefix
+            backend: { service: { name: jit-authorizer, port: { number: 8998 } } }
 ---
 # 2. the gated site
 apiVersion: networking.k8s.io/v1
@@ -117,6 +124,14 @@ spec:
   ingressClassName: nginx
   rules:
     - host: app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: upstream, port: { number: 80 } } }
+    # Same gate, stealth failure mode, so the lab's stealth probes have a target
+    # on this engine too.
+    - host: stealth.example.com
       http:
         paths:
           - path: /

@@ -39,9 +39,10 @@ local ccanon, canon_err       = soft_require "jitaccess.core.canon"
 local ccrypto, crypto_err     = soft_require "jitaccess.core.crypto"
 local cstore, store_err       = soft_require "jitaccess.core.store"
 local cregistry, registry_err = soft_require "jitaccess.core.registry"
+local cpages, pages_err       = soft_require "jitaccess.core.pages"
 
 -- Non-nil when any core module failed to load; access() turns it into a deny.
-local CORE_ERR = canon_err or crypto_err or store_err or registry_err
+local CORE_ERR = canon_err or crypto_err or store_err or registry_err or pages_err
 
 local get_multiple_variables = utils.get_multiple_variables
 
@@ -421,6 +422,16 @@ function jitaccess:_access()
     return self:respond(sname, ip)
   elseif uri == prefix .. "/enroll" and method == "POST" then
     return self:enroll(sname, ip)
+  elseif uri == prefix .. "/register" and method == "GET" then
+    -- Only a browser WITHOUT the extension gets here; an installed one
+    -- intercepts the navigation client-side. Identical for any code value, so
+    -- it is no enrollment-code oracle.
+    ngx.header["Content-Type"] = "text/html; charset=utf-8"
+    ngx.header["Cache-Control"] = "no-store"
+    ngx.header["Referrer-Policy"] = "no-referrer"   -- the URL carries a single-use code
+    ngx.status = ngx.HTTP_OK
+    ngx.say(cpages.REGISTER_HTML)
+    return self:ret(true, "jit register page", ngx.HTTP_OK)
   elseif uri == prefix or uri:sub(1, #prefix + 1) == prefix .. "/" then
     return self:deny("jit protocol endpoint")
   end

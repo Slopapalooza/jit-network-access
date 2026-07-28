@@ -22,6 +22,7 @@ local ccanon    = require "jitaccess.core.canon"
 local ccrypto   = require "jitaccess.core.crypto"
 local cstore    = require "jitaccess.core.store"
 local cregistry = require "jitaccess.core.registry"
+local cpages    = require "jitaccess.core.pages"
 local cjson     = require "cjson.safe"
 
 local _M = { _VERSION = "0.1.0" }
@@ -331,6 +332,17 @@ local function _access()
     if uri == prefix .. "/challenge" and method == "GET"  then return challenge(sname, ip, svc) end
     if uri == prefix .. "/respond"   and method == "POST" then return respond(sname, ip, svc) end
     if uri == prefix .. "/enroll"    and method == "POST" then return enroll(sname, ip, svc) end
+    if uri == prefix .. "/register"  and method == "GET"  then
+      -- Only a browser WITHOUT the extension gets here; an installed one
+      -- intercepts the navigation client-side. Identical for any code value, so
+      -- it is no enrollment-code oracle.
+      ngx.header["Content-Type"] = "text/html; charset=utf-8"
+      ngx.header["Cache-Control"] = "no-store"
+      ngx.header["Referrer-Policy"] = "no-referrer"   -- the URL carries a single-use code
+      ngx.status = ngx.HTTP_OK
+      ngx.say(cpages.REGISTER_HTML)
+      return ngx.exit(ngx.HTTP_OK)
+    end
     return deny(svc)                                  -- any other path under the prefix stays dark
   end
 

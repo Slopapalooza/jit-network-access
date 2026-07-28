@@ -28,7 +28,7 @@ for f in "$src"/*.go; do
   cp "$f" "$dst/"
 done
 
-for m in pae canon crypto registry store; do
+for m in pae canon crypto registry store pages; do
   test -f "$dst/$m.go" || { echo "missing core module: $m"; exit 1; }
 done
 

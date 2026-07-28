@@ -810,7 +810,7 @@ func TestRegisterLandingPage(t *testing.T) {
 		t.Fatalf("register page: got %d want 200", w.Code)
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, ExtensionReleasesURL) {
+	if !strings.Contains(body, jitcore.ExtensionReleasesURL) {
 		t.Error("register page must link to the releases page")
 	}
 	if w.Header().Get("Referrer-Policy") != "no-referrer" {
