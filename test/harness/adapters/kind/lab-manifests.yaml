@@ -105,6 +105,14 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/auth-url: "http://jit-authorizer.jit-system.svc.cluster.local:8998/authz"
     nginx.ingress.kubernetes.io/auth-response-headers: "Set-Cookie, X-JIT-Kid"
+    # Mirrors adapters/kubernetes/ingress-example.yaml: blank the identity
+    # headers a client could otherwise forge on the auth subrequest, so the lab
+    # exercises the same shape production runs.
+    nginx.ingress.kubernetes.io/auth-snippet: |
+      proxy_set_header X-Forwarded-Host "";
+      proxy_set_header X-Original-Host "";
+      proxy_set_header X-Forwarded-Uri "";
+      proxy_set_header X-Original-Uri "";
 spec:
   ingressClassName: nginx
   rules:

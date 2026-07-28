@@ -71,23 +71,81 @@ device could never knock its way in. So `/.well-known/jit-access/` gets its own
 Ingress that routes straight to the Authorizer and carries **no** auth
 annotation. ingress-nginx matches the more specific path first.
 
-## trusted_proxies
+## trusted_proxies — narrow it, do not paste RFC1918
 
 The Authorizer sees the **ingress controller pod** as its TCP peer, not the
 client, so it must be told to trust that hop and read the forwarded header:
 
 ```json
-"trusted_proxies": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+"trusted_proxies": ["10.42.0.0/16"]
 ```
 
-Narrow this to your actual pod CIDR if you know it. Everything outside the list
-is treated as a direct client whose forwarded headers are ignored — which is why
-the Authorizer stays safe even if something else reaches it.
+Set this to the **ingress controller's pod CIDR**. Listing all of RFC1918 (which
+earlier versions of this manifest did) breaks the design in two separate ways:
 
-The Service is deliberately `ClusterIP` with no Ingress of its own: `/authz` and
-`/admin/*` must never be reachable from outside the cluster. The Authorizer also
-refuses those paths from any peer outside `trusted_proxies`, but not being
-routable is the real control.
+1. `/authz` and `/admin/*` refuse peers outside the list — and every pod in the
+   cluster sits inside `10.0.0.0/8` by default, so a broad list makes that check
+   a no-op and any workload in the cluster can drive the gate.
+2. Resolving the client IP **skips** every candidate inside the list. On an
+   on-prem or VPN cluster where users are on `10.x`, a broad list means every
+   client is skipped, everyone falls back to the controller's own address, and
+   they all **share one grant** — one person knocks and everybody is admitted.
+   The `externalTrafficPolicy` warning above does not catch this, because it
+   only affects external clients.
+
+Find yours with `kubectl -n ingress-nginx get pods -o wide`.
+
+## Reaching the Authorizer
+
+The Service is `ClusterIP` with no Ingress of its own: `/authz` and `/admin/*`
+must never be reachable from outside the cluster.
+
+A ClusterIP is still reachable from **every pod in the cluster**, so
+`authorizer.yaml` also ships a `NetworkPolicy` restricting `:8998` to the
+ingress-controller namespace. Adjust its `namespaceSelector` to match your
+controller. Without it, any compromised or hostile workload can call `/authz`
+with headers of its choosing.
+
+## admin_token
+
+The shipped config deliberately has **no** `admin_token`, so `/admin/*` refuses
+every request out of the box. A placeholder value would be a cluster-wide
+backdoor for every operator who never changed it — and the admin API mints
+grants that skip the registry re-check, i.e. access with no token at all.
+
+To enable it, generate a value and add it to the Secret:
+
+```bash
+openssl rand -base64 32
+```
+
+Keep the NetworkPolicy in place regardless: the token is the second line, not
+the first.
+
+## Forgeable headers on the auth subrequest
+
+ingress-nginx forwards the **client's own headers** on the auth subrequest, and
+the controller pod is inside `trusted_proxies`. The controller describes the
+original request with `X-Original-URL`; a client that also sends
+`X-Forwarded-Host` or `X-Forwarded-Uri` is describing it a second, different way.
+
+The Authorizer does **not** pick a winner — no fixed precedence is safe, because
+which header is authoritative depends on the proxy. It reads every convention
+present and **denies when two disagree**. So a forged header makes the attacker's
+own request fail; it cannot select someone else's service or open the protocol
+carve-out.
+
+Blanking the unused ones with an `auth-snippet` is still worth doing — it turns a
+confusing denial into a clean one — but it is defence in depth now, not the thing
+standing between a client and someone else's grant:
+
+```yaml
+nginx.ingress.kubernetes.io/auth-snippet: |
+  proxy_set_header X-Forwarded-Host "";
+  proxy_set_header X-Original-Host "";
+  proxy_set_header X-Forwarded-Uri "";
+  proxy_set_header X-Original-Uri "";
+```
 
 ## Known difference: no `X-JIT-Access` marker on denials
 
@@ -113,8 +171,8 @@ silently.
 | Annotation | Purpose |
 |---|---|
 | `nginx.ingress.kubernetes.io/auth-url` | the Authorizer's `/authz` — this is the gate |
-| `nginx.ingress.kubernetes.io/auth-response-headers: Set-Cookie` | **required for `ip+cookie`** — without it the grant cookie never reaches the browser |
-| `nginx.ingress.kubernetes.io/auth-snippet` | optional; forward extra headers to the Authorizer |
+| `nginx.ingress.kubernetes.io/auth-response-headers: X-JIT-Kid` | optional; passes the admitting kid to the backend for logging. `Set-Cookie` is **not** needed: `/authz` never sets one — the grant cookie comes from the knock, which reaches the browser through the ungated protocol Ingress |
+| `nginx.ingress.kubernetes.io/auth-snippet` | recommended; blanks the forwarding conventions the controller does not set, so a client cannot make its own request ambiguous |
 
 ## Rotating tokens
 

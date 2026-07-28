@@ -25,7 +25,15 @@ function _M.canon_server_name(host)
   host = host:gsub("^%s+", ""):gsub("%s+$", "")
   -- bracketed IPv6 literal [..]:port (defensive; server_name is normally a name)
   local inner = host:match("^%[([^%]]+)%]")
-  if inner then return inner:lower() end
+  if inner then
+    -- Trim the INNER text too. The Python and Go references both strip it
+    -- (h[1:end].strip() / strings.TrimSpace), so without this "[ ::1 ]"
+    -- canonicalized to "::1" on three engines and " ::1 " here — a different MAC
+    -- input and a different grant key for the same client, which is exactly the
+    -- cross-engine divergence the shared vectors exist to prevent.
+    inner = inner:gsub("^%s+", ""):gsub("%s+$", "")
+    return inner:lower()
+  end
   -- strip a trailing :port (a hostname contains no ':')
   local h = host:match("^(.-):%d+$")
   if h then host = h end
@@ -70,14 +78,33 @@ local function ipv6_groups(addr)
   if addr:find(".", 1, true) then
     local head, quad = addr:match("^(.*:)(%d+%.%d+%.%d+%.%d+)$")
     if not head then return nil, "bad v4-in-v6" end
-    local a, b, c, d = quad:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
-    a, b, c, d = tonumber(a), tonumber(b), tonumber(c), tonumber(d)
-    if not d or a > 255 or b > 255 or c > 255 or d > 255 then return nil, "bad v4-in-v6" end
+    local qa, qb, qc, qd = quad:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
+    if not qd then return nil, "bad v4-in-v6" end
+    -- Same leading-zero rejection as the plain IPv4 path. Go and Python reject
+    -- "::ffff:01.2.3.4"; accepting it here meant one engine keyed a grant on an
+    -- address the others refused outright.
+    for _, o in ipairs({ qa, qb, qc, qd }) do
+      if #o > 1 and o:sub(1, 1) == "0" then return nil, "v4-in-v6 leading zero" end
+    end
+    local a, b, c, d = tonumber(qa), tonumber(qb), tonumber(qc), tonumber(qd)
+    if a > 255 or b > 255 or c > 255 or d > 255 then return nil, "bad v4-in-v6" end
     addr = head .. format("%x:%x", a * 256 + b, c * 256 + d)
   end
 
   local raw = {}
   local dbl = addr:find("::", 1, true)
+  -- Exactly one "::" is legal. "1::2::3" is ambiguous and both Go (net/netip)
+  -- and Python (ipaddress) reject it; accepting it here meant two engines
+  -- disagreed about what address a grant was keyed on.
+  if dbl and addr:find("::", dbl + 2, true) then return nil, "multiple ::" end
+  -- Stray colons. These checks are UNCONDITIONAL: gating them on `not dbl` meant
+  -- they never ran for any address containing "::", which is every case they
+  -- were written to catch. gmatch("[^:]+") below silently drops the extra
+  -- colons, so ":::" , ":1::2" and "1::2:" all reached the 8-group count and
+  -- were accepted — while Go, Python and the shipped vectors all reject them.
+  if addr:find(":::", 1, true) then return nil, "colon run" end
+  if addr:sub(1, 1) == ":" and addr:sub(1, 2) ~= "::" then return nil, "stray colon" end
+  if addr:sub(-1) == ":" and addr:sub(-2) ~= "::" then return nil, "stray colon" end
   if dbl then
     local left, right = addr:sub(1, dbl - 1), addr:sub(dbl + 2)
     local lg, rg = {}, {}
@@ -128,14 +155,17 @@ local function compress(nums)
   return table.concat(parts, ":")
 end
 
-local function canon_ipv6(addr, prefix)
+local function canon_ipv6(addr, prefix, v4_prefix)
   local nums, err = ipv6_groups(addr)
   if not nums then return nil, err end
-  -- IPv4-mapped (::ffff:a.b.c.d) normalizes to IPv4 (match Python ipv4_mapped)
+  -- IPv4-mapped (::ffff:a.b.c.d) normalizes to IPv4 (match Python ipv4_mapped).
+  -- The result is an IPv4 address, so the IPv4 prefix applies to it — passing a
+  -- hard-coded 32 here meant a dual-stack client reaching a v4_prefix-masked
+  -- deployment got a DIFFERENT grant key than the same client over plain IPv4.
   if nums[1] == 0 and nums[2] == 0 and nums[3] == 0 and nums[4] == 0
      and nums[5] == 0 and nums[6] == 0xffff then
     return canon_ipv4_nums(floor(nums[7] / 256), nums[7] % 256,
-                           floor(nums[8] / 256), nums[8] % 256, 32)
+                           floor(nums[8] / 256), nums[8] % 256, v4_prefix)
   end
   if prefix < 128 then
     for i = 1, 8 do
@@ -153,10 +183,15 @@ local function canon_ipv6(addr, prefix)
 end
 
 function _M.canon_ip(addr, v6_prefix, v4_prefix)
+  if type(addr) ~= "string" or addr == "" then return nil, "empty address" end
   v6_prefix = v6_prefix or 128
   v4_prefix = v4_prefix or 32
+  -- Go errors on a negative prefix rather than masking with it; match that
+  -- instead of silently collapsing every client onto "::" or "0.0.0.0".
+  if v6_prefix < 0 or v6_prefix > 128 then return nil, "bad v6 prefix" end
+  if v4_prefix < 0 or v4_prefix > 32 then return nil, "bad v4 prefix" end
   if addr:find(":", 1, true) then
-    return canon_ipv6(addr, v6_prefix)
+    return canon_ipv6(addr, v6_prefix, v4_prefix)
   end
   return canon_ipv4(addr, v4_prefix)
 end

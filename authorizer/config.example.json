@@ -1,6 +1,6 @@
 {
   "listen": "127.0.0.1:8998",
-  "admin_token": "CHANGE-ME-generate-with-openssl-rand-base64-32",
+  "admin_listen": "127.0.0.1:8999",
 
   "trusted_proxies": ["127.0.0.0/8", "::1/128"],
   "real_ip_header": "X-Forwarded-For",

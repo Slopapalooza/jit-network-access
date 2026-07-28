@@ -18,10 +18,12 @@ is done in main() and is exercised by the docker harness (M1).
 """
 
 import base64
+import json
 import os
 import sys
 
 MIN_SECRET_BYTES = 16   # a 32-byte secret is standard; refuse anything trivially short
+MAX_TOKEN_SLOTS = 256   # JIT_ACCESS_TOKEN_1.._N window to validate
 
 
 def _b64url_decode(s: str) -> bytes:
@@ -57,14 +59,16 @@ def collect_token_entries(getenv=os.getenv) -> list:
     base = getenv("JIT_ACCESS_TOKEN")
     if base:
         entries.append(base)
-    i = 1
-    while True:
+    # Scan a fixed window rather than stopping at the first gap. The Lua side
+    # enumerates settings with pairs(), so it loads EVERY slot regardless of
+    # numbering; breaking at the first missing index meant a token in a
+    # non-contiguous slot (_1, _3) was live in the gate but never validated here
+    # — which defeats a job whose whole purpose is to make misconfiguration fail
+    # loudly rather than at knock time.
+    for i in range(1, MAX_TOKEN_SLOTS + 1):
         v = getenv(f"JIT_ACCESS_TOKEN_{i}")
-        if v is None:
-            break
         if v:
             entries.append(v)
-        i += 1
     return entries
 
 
@@ -77,6 +81,22 @@ def build_registry(entries: list) -> dict:
             raise ValueError(f"duplicate kid {tok['kid']!r}")
         tokens[tok["kid"]] = tok
     return {"v": 1, "tokens": tokens}
+
+
+def redacted_report(registry: dict) -> dict:
+    """The validation result, with every secret stripped.
+
+    registry["tokens"] is keyed by kid and each value carries `secret_b64url`.
+    Only the non-secret fields are reported.
+    """
+    return {
+        "v": registry.get("v", 1),
+        "count": len(registry["tokens"]),
+        "tokens": [
+            {k: tok[k] for k in ("kid", "label", "expires", "alg") if k in tok}
+            for tok in registry["tokens"].values()
+        ],
+    }
 
 
 def main() -> int:
@@ -100,10 +120,17 @@ def main() -> int:
         logger.error(f"invalid JIT_ACCESS_TOKEN registry: {e}")
         return 2   # hard error -> scheduler surfaces it; service stays fail-closed
 
-    import json
     job = Job(logger, __file__)
-    # TODO(hardened): encrypt this cache at rest under a KEK; lock perms to worker UID.
-    job.cache_file("registry.json", json.dumps(registry).encode("utf-8"))
+    # The cached report deliberately carries NO secrets.
+    #
+    # This file used to include every device's `secret_b64url` in cleartext, with
+    # a TODO about encrypting it later. It was pure liability: the Lua never
+    # reads this file — jitaccess:init() parses JIT_ACCESS_TOKEN_* from the
+    # settings itself — so the secrets bought nothing and simply spread the most
+    # sensitive material in the system into another file (and into BunkerWeb's
+    # database-backed cache). What the job is actually for is validation, and
+    # kid/label/expiry/count is all a human needs to read the result.
+    job.cache_file("registry.json", json.dumps(redacted_report(registry)).encode("utf-8"))
     logger.info(f"jitaccess registry validated: {len(registry['tokens'])} token(s)")
     return 1 if entries else 0   # 1 = changed -> reload; 0 = nothing to do
 
@@ -124,6 +151,27 @@ def _self_test() -> int:
         dup = [good, good]; build_registry(dup); ok = False; print("  should reject duplicate kid")
     except ValueError:
         pass
+
+    # The cached report must never carry key material: this file lands in
+    # /var/cache/bunkerweb and in BunkerWeb's database-backed cache, and nothing
+    # reads it back (the Lua parses the settings itself), so a secret in here is
+    # pure liability.
+    report = redacted_report(reg)
+    blob = json.dumps(report)
+    if "secret" in blob:
+        ok = False
+        print("  report leaks a secret field")
+    secret_b64 = base64.urlsafe_b64encode(b"\x00" * 32).decode().rstrip("=")
+    if secret_b64 in blob:
+        ok = False
+        print("  report leaks the secret value")
+    if report["count"] != 1 or report["tokens"][0]["kid"] != "kid_AAAA":
+        ok = False
+        print(f"  report lost the non-secret fields: {report!r}")
+    if report["tokens"][0].get("label") != "Ops laptop":
+        ok = False
+        print(f"  report lost the label: {report!r}")
+
     print("self-test:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 

@@ -70,7 +70,8 @@ See [`config.example.json`](config.example.json). Keys:
 | Key | Default | Meaning |
 |---|---|---|
 | `listen` | `127.0.0.1:8998` | protocol + `/authz` listener. Keep it internal. |
-| `admin_token` | — | bearer token for `/admin/*`; the API is disabled when empty |
+| `admin_token` | — (absent) | bearer token for `/admin/*`. **The example config ships without one, so the admin API is OFF until you set it.** A shipped placeholder is a working credential for every operator who never changed it; generate with `openssl rand -base64 32` |
+| `admin_listen` | — | bind `/admin/*` to its own address instead of the main listener; when set, the admin API is **absent** from `listen` |
 | `trusted_proxies` | `127.0.0.0/8`, `::1/128` | CIDRs whose forwarded headers are honored |
 | `real_ip_header` | `X-Forwarded-For` | header walked in proxy mode |
 | `uri_prefix` | `/.well-known/jit-access` | base path of the protocol endpoints |

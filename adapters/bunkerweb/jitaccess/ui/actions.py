@@ -313,11 +313,19 @@ def _delete(kwargs, db, request, Response):
             service_updates[s] = " ".join(x for x in cur if x != kid)
 
     _write_tokens(db, entries, service_updates or None)
-    _instance_post(kwargs, "/jitaccess/revoke-token", {"kid": kid})   # evict live grants now
+    evicted, _ = _instance_post(kwargs, "/jitaccess/revoke-token", {"kid": kid})   # evict live grants now
+    # Delete self-heals even if the call did not land — the kid is gone from
+    # config, so is_allowed's registry re-check evicts on the next request after
+    # reload — but say which happened rather than asserting immediate revocation.
+    if evicted:
+        msg = "Token deleted; it was stripped from every site and any active access was revoked."
+    else:
+        msg = ("Token deleted and stripped from every site, but no instance confirmed the "
+               "immediate revocation — existing access ends on the next request after the "
+               "config reload, when the gate re-checks the registry.")
     if _wants_json(request):
         return _json(Response, db, {
-            "action": "delete", "kid": kid,
-            "message": "Token deleted; it was stripped from every site and any active access was revoked.",
+            "action": "delete", "kid": kid, "revoked": bool(evicted), "message": msg,
         })
     return _redirect_back(request, Response)
 
@@ -339,17 +347,31 @@ def _regenerate(kwargs, db, request, Response):
         return Response(_page(request, "Regenerate", '<p class="err">Token not found.</p>'), mimetype="text/html", status=404)
 
     _write_tokens(db, entries)                                          # kid unchanged -> allow-lists untouched
-    _instance_post(kwargs, "/jitaccess/revoke-token", {"kid": kid})     # old device out now
-    note = ("The previous device has been revoked and its old secret no longer works. "
-            "After the next reload, use Enroll device to enroll the replacement.")
+    evicted, _ = _instance_post(kwargs, "/jitaccess/revoke-token", {"kid": kid})
+    # Do NOT claim the old device is out unless an instance confirmed it.
+    #
+    # Regenerating changes the secret in config, so the old device cannot knock
+    # AGAIN — but any grant it already holds stays live until its TTL, and the
+    # kid is unchanged, so nothing about the new config evicts it. If the
+    # revoke-token call did not reach an instance, saying "has been revoked" is
+    # simply false, and unlike delete (which removes the kid, so the next reload
+    # evicts on the registry re-check) this does not self-heal.
+    if evicted:
+        note = ("The previous device has been revoked and its old secret no longer works. "
+                "After the next reload, use Enroll device to enroll the replacement.")
+    else:
+        note = ("WARNING: the new secret is saved, but no instance confirmed the revocation, "
+                "so any access the OLD device already holds remains valid until its grant "
+                "expires (JIT_ACCESS_GRANT_TIME). Check instance connectivity, or wait out "
+                "the grant TTL, before treating the old device as locked out.")
     if _wants_json(request):
         return _json(Response, db, {
-            "action": "regenerate", "kid": kid, "label": label,
+            "action": "regenerate", "kid": kid, "label": label, "revoked": bool(evicted),
             "message": f"Token “{label}” regenerated with a new secret.", "note": note,
         })
     body = (
         f'<p class="ok">&#10003; Token <b>{escape(label)}</b> (<code>{escape(kid)}</code>) regenerated '
-        f'with a new secret.</p><p class="muted">{escape(note)}</p>'
+        f'with a new secret.</p><p class="{"muted" if evicted else "err"}">{escape(note)}</p>'
     )
     return Response(_page(request, "Token regenerated", body), mimetype="text/html")
 

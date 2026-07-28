@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -62,10 +63,16 @@ type Config struct {
 	IPv6Prefix int `json:"ipv6Prefix,omitempty"` // 128 = exact address
 	RateLimit  int `json:"rateLimit,omitempty"`  // knocks/min/IP
 
-	// TrustForwarded keys grants on the left-most X-Forwarded-For entry instead
-	// of the TCP peer. Only safe when Traefik's entryPoint forwardedHeaders
-	// trustedIPs is correctly narrowed; the default is immune to spoofing.
+	// TrustForwarded derives the client IP from X-Forwarded-For instead of the
+	// TCP peer. It REQUIRES TrustedProxies; see clientIP for why.
 	TrustForwarded bool `json:"trustForwarded,omitempty"`
+
+	// TrustedProxies are the CIDRs (or bare addresses) that our own infrastructure
+	// occupies. Both the TCP peer and every X-Forwarded-For entry are checked
+	// against this list, and the first address from the RIGHT that is not in it
+	// is the client. Without it, TrustForwarded cannot be made safe and New()
+	// refuses the configuration.
+	TrustedProxies []string `json:"trustedProxies,omitempty"`
 }
 
 // CreateConfig returns the default configuration. Traefik calls this before
@@ -106,12 +113,44 @@ func shared() error {
 	return sharedErr
 }
 
+// Expiry is lazy on the read path, so nothing here is required for correctness —
+// but without reclamation the maps only ever grow, and an unauthenticated client
+// controls how fast (one spent nonce per successful knock, one rate-limit entry
+// per source address, one grant per address).
+//
+// Driven from the request path rather than a goroutine + time.Ticker on purpose:
+// the plugin is interpreted by Yaegi and has no shutdown hook, so a background
+// loop would be both a portability risk and impossible to stop across the config
+// reloads that rebuild middleware instances.
+const sweepEvery = 60 // seconds
+
+var (
+	sweepMu   sync.Mutex
+	lastSweep int64
+)
+
+func maybeSweep(now int64) {
+	sweepMu.Lock()
+	if now-lastSweep < sweepEvery {
+		sweepMu.Unlock()
+		return
+	}
+	lastSweep = now
+	sweepMu.Unlock()
+
+	sharedGrants.Sweep(now)
+	sharedNonces.Sweep(now)
+	sharedCodes.Sweep(now)
+	sharedRL.sweep(now)
+}
+
 // JITAccess is the middleware handler.
 type JITAccess struct {
-	next http.Handler
-	name string
-	cfg  *Config
-	reg  *jitcore.Registry
+	next    http.Handler
+	name    string
+	cfg     *Config
+	reg     *jitcore.Registry
+	trusted []netip.Prefix // parsed cfg.TrustedProxies
 }
 
 // New builds the middleware. Traefik calls this per router.
@@ -160,6 +199,21 @@ func New(ctx context.Context, next http.Handler, cfg *Config, name string) (http
 		cfg.RateLimit = 10
 	}
 
+	// A grant is keyed on the client IP, so whatever decides that value decides
+	// who the grant belongs to. Trusting X-Forwarded-For without knowing which
+	// hops are ours is not merely weak, it is inverted: Traefik PRESERVES an
+	// incoming X-Forwarded-For and appends the peer, so the left-most entry is
+	// precisely the part the client wrote. Refuse the combination rather than
+	// ship a switch that looks safe and is not.
+	trusted, err := parsePrefixes(cfg.TrustedProxies)
+	if err != nil {
+		return nil, fmt.Errorf("jitaccess: trustedProxies: %w", err)
+	}
+	if cfg.TrustForwarded && len(trusted) == 0 {
+		return nil, fmt.Errorf("jitaccess: trustForwarded requires trustedProxies " +
+			"(the CIDRs your proxies occupy) — without it any client can choose its own grant key")
+	}
+
 	tokens := map[string]*jitcore.Token{}
 	for _, t := range cfg.Tokens {
 		sec, err := jitcore.B64uDecode(t.Secret)
@@ -180,27 +234,96 @@ func New(ctx context.Context, next http.Handler, cfg *Config, name string) (http
 	// The allow-list is router-scoped; the actual host is checked at request time.
 	reg := jitcore.NewRegistry(tokens, map[string]map[string]bool{"*": allow})
 
-	return &JITAccess{next: next, name: name, cfg: cfg, reg: reg}, nil
+	return &JITAccess{next: next, name: name, cfg: cfg, reg: reg, trusted: trusted}, nil
 }
 
-func (j *JITAccess) clientIP(r *http.Request) (string, error) {
-	addr := r.RemoteAddr
-	if j.cfg.TrustForwarded {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			if i := strings.Index(xff, ","); i != -1 {
-				addr = strings.TrimSpace(xff[:i])
-			} else {
-				addr = strings.TrimSpace(xff)
+// parsePrefixes accepts CIDRs and bare addresses (treated as /32 or /128).
+func parsePrefixes(list []string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, s := range list {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			a, aerr := netip.ParseAddr(s)
+			if aerr != nil {
+				return nil, fmt.Errorf("%q is not a CIDR or address: %w", s, err)
 			}
+			p = netip.PrefixFrom(a, a.BitLen())
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+func (j *JITAccess) isTrusted(a netip.Addr) bool {
+	a = a.Unmap()
+	for _, p := range j.trusted {
+		if p.Contains(a) {
+			return true
 		}
 	}
-	if h, _, err := net.SplitHostPort(addr); err == nil {
-		addr = h
+	return false
+}
+
+func parseHostAddr(s string) (netip.Addr, error) {
+	s = strings.TrimSpace(s)
+	if h, _, err := net.SplitHostPort(s); err == nil {
+		s = h
 	}
-	return jitcore.CanonIP(strings.Trim(addr, "[]"), j.cfg.IPv6Prefix, 32)
+	a, err := netip.ParseAddr(strings.Trim(s, "[]"))
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	return a.Unmap(), nil
+}
+
+// clientIP is the value grants are keyed on.
+//
+// Default: the TCP peer, which no request header can move.
+//
+// With TrustForwarded (which New() only permits alongside TrustedProxies): walk
+// X-Forwarded-For from the RIGHT and take the first address that is not one of
+// our own proxies. Entries a client appends sit to the LEFT of the ones our
+// trusted hops appended, so they can never win. Taking the left-most entry — as
+// this did before — hands every client the ability to nominate its own grant
+// key, and Traefik makes that worse by preserving an incoming header verbatim.
+//
+// Anything unparseable, or a peer that is not itself trusted, falls back to the
+// peer: never to a client-supplied value.
+func (j *JITAccess) clientIP(r *http.Request) (string, error) {
+	peer, err := parseHostAddr(r.RemoteAddr)
+	if err != nil {
+		return "", fmt.Errorf("jitaccess: unparseable peer %q: %w", r.RemoteAddr, err)
+	}
+	if !j.cfg.TrustForwarded || !j.isTrusted(peer) {
+		return jitcore.CanonIP(peer.String(), j.cfg.IPv6Prefix, 32)
+	}
+	// Flatten every X-Forwarded-For line into one ordered list before walking it
+	// backwards: with repeated header lines the right-most entry overall is the
+	// most recently appended, so per-line walking would pick the wrong one.
+	var chain []string
+	for _, v := range r.Header.Values("X-Forwarded-For") {
+		chain = append(chain, strings.Split(v, ",")...)
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		a, err := parseHostAddr(chain[i])
+		if err != nil {
+			continue
+		}
+		if j.isTrusted(a) {
+			continue // another hop of our own infrastructure
+		}
+		return jitcore.CanonIP(a.String(), j.cfg.IPv6Prefix, 32)
+	}
+	// A trusted peer that forwarded nothing usable (health check, direct hit).
+	return jitcore.CanonIP(peer.String(), j.cfg.IPv6Prefix, 32)
 }
 
 func (j *JITAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	maybeSweep(now())
 	service := jitcore.CanonServerName(r.Host)
 	ip, err := j.clientIP(r)
 	if err != nil || service == "" {
@@ -217,7 +340,7 @@ func (j *JITAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case r.URL.Path == p+"/respond" && r.Method == http.MethodPost:
 			j.respond(w, r, service, ip)
 		case r.URL.Path == p+"/enroll" && r.Method == http.MethodPost:
-			j.enroll(w, r)
+			j.enroll(w, r, ip)
 		default:
 			j.deny(w) // any other path under the prefix stays dark
 		}
@@ -237,7 +360,12 @@ func (j *JITAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (j *JITAccess) challenge(w http.ResponseWriter, service, ip string) {
 	if !sharedRL.allow(ip, j.cfg.RateLimit, now()) {
-		w.WriteHeader(http.StatusTooManyRequests)
+		// deny(), not a bare 429: PROTOCOL §6 requires every rejection at these
+		// endpoints to be the SAME generic response. A 429 here was a free
+		// endpoint-discovery oracle — in stealth mode the protocol paths answered
+		// 429 while every other path answered 404, so three requests located the
+		// gate.
+		j.deny(w)
 		return
 	}
 	rnd, err := jitcore.RandomBytes(16)
@@ -268,7 +396,12 @@ var dummySecret = make([]byte, 32)
 
 func (j *JITAccess) respond(w http.ResponseWriter, r *http.Request, service, ip string) {
 	if !sharedRL.allow(ip, j.cfg.RateLimit, now()) {
-		w.WriteHeader(http.StatusTooManyRequests)
+		// deny(), not a bare 429: PROTOCOL §6 requires every rejection at these
+		// endpoints to be the SAME generic response. A 429 here was a free
+		// endpoint-discovery oracle — in stealth mode the protocol paths answered
+		// 429 while every other path answered 404, so three requests located the
+		// gate.
+		j.deny(w)
 		return
 	}
 	var body respondBody
@@ -327,17 +460,35 @@ func (j *JITAccess) respond(w http.ResponseWriter, r *http.Request, service, ip 
 			HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode, MaxAge: int(ttl),
 		})
 	}
-	sharedGrants.Put(g)
+	oldHash := ""
+	if ck, err := r.Cookie(grantCookieName); err == nil && ck.Value != "" {
+		oldHash = jitcore.CookieHash(ck.Value)
+	}
+	sharedGrants.Put(g, oldHash)
 
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (j *JITAccess) enroll(w http.ResponseWriter, r *http.Request) {
+func (j *JITAccess) enroll(w http.ResponseWriter, r *http.Request, ip string) {
+	// PROTOCOL §2.1 requires this endpoint to be rate-limited, and it is the
+	// highest-value target in the protocol: it trades a code for a long-term
+	// device secret. It was the one knock endpoint with no throttle at all.
+	if !sharedRL.allow(ip, j.cfg.RateLimit, now()) {
+		j.deny(w)
+		return
+	}
 	var body struct {
 		Code string `json:"code"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil || body.Code == "" {
+		j.deny(w)
+		return
+	}
+	// Look the kid up BEFORE consuming: Consume is delete-after-read, so doing it
+	// first let any hostile POST destroy a valid code for a kid this router does
+	// not serve. Peek, validate, then burn.
+	if peek := sharedCodes.Peek(body.Code, now()); peek == nil || j.reg.Lookup(peek.Kid) == nil {
 		j.deny(w)
 		return
 	}
@@ -392,6 +543,20 @@ type rlEntry struct {
 }
 
 func newRateLimiter() *rateLimiter { return &rateLimiter{m: map[string]*rlEntry{}} }
+
+// sweep drops finished windows. Without it every distinct source address left a
+// permanent entry: with the default ipv6Prefix of 128 an attacker sourcing from
+// a routed /64 could add one per request forever and eventually OOM the proxy
+// fronting every router, not just the gated one.
+func (l *rateLimiter) sweep(now int64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for k, e := range l.m {
+		if now-e.start >= 60 {
+			delete(l.m, k)
+		}
+	}
+}
 
 func (l *rateLimiter) allow(ip string, perMin int, now int64) bool {
 	if perMin <= 0 {

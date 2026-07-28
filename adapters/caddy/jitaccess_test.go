@@ -326,6 +326,7 @@ jit_access {
     ipv6_prefix 64
     rate_limit 25
     trust_forwarded
+    trusted_proxies 10.0.0.0/8 192.168.1.5
     token kid_a AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE ops laptop
     allow kid_a
 }`)
@@ -338,6 +339,9 @@ jit_access {
 	}
 	if j.IPv6Prefix != 64 || j.RateLimit != 25 || !j.TrustForwarded {
 		t.Errorf("numeric/bool options not parsed: %+v", j)
+	}
+	if len(j.TrustedProxies) != 2 || j.TrustedProxies[0] != "10.0.0.0/8" {
+		t.Errorf("trusted_proxies not parsed: %+v", j.TrustedProxies)
 	}
 	if len(j.Tokens) != 1 || j.Tokens[0].Kid != "kid_a" || j.Tokens[0].Label != "ops laptop" {
 		t.Errorf("token not parsed: %+v", j.Tokens)

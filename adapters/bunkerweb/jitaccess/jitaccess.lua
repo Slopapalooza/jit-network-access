@@ -22,10 +22,26 @@ local plugin   = require "bunkerweb.plugin"
 local utils    = require "bunkerweb.utils"
 local cjson    = require "cjson.safe"
 
-local ccanon    = require "jitaccess.core.canon"
-local ccrypto   = require "jitaccess.core.crypto"
-local cstore    = require "jitaccess.core.store"
-local cregistry = require "jitaccess.core.registry"
+-- The portable core is VENDORED in by build-vendor.sh and is git-ignored, so
+-- "it isn't there" is a realistic deployment state (skipped build step, partial
+-- upload, a corrupt module after an upgrade). A bare `require` would abort the
+-- whole plugin load — and BunkerWeb logs a plugin load error and CONTINUES the
+-- access chain, so the gate would silently vanish and the dark service would be
+-- served to everyone. Loading defensively keeps the plugin loadable so that its
+-- own access() still runs and denies (SECURITY-REVIEW C1 / DESIGN §11 R1).
+local function soft_require(name)
+  local ok, mod = pcall(require, name)
+  if ok and mod then return mod end
+  return nil, tostring(mod)
+end
+
+local ccanon, canon_err       = soft_require "jitaccess.core.canon"
+local ccrypto, crypto_err     = soft_require "jitaccess.core.crypto"
+local cstore, store_err       = soft_require "jitaccess.core.store"
+local cregistry, registry_err = soft_require "jitaccess.core.registry"
+
+-- Non-nil when any core module failed to load; access() turns it into a deny.
+local CORE_ERR = canon_err or crypto_err or store_err or registry_err
 
 local get_multiple_variables = utils.get_multiple_variables
 
@@ -47,9 +63,16 @@ end
 
 function jitaccess:initialize(ctx)
   plugin.initialize(self, "jitaccess", ctx)
+  -- Without the core there is nothing to initialize; leave self.store nil so
+  -- access() denies rather than raising here (initialize is not wrapped, and an
+  -- error would take the plugin out of the chain entirely = fail open).
+  if CORE_ERR then return end
   local grants, nonces = ngx.shared.jit_grants, ngx.shared.jit_nonces
   if grants and nonces then
-    self.store = cstore.new({ grants = grants, nonces = nonces })
+    -- jit_rl is optional so an instance that has not picked up the new http conf
+    -- still starts; store.new falls back to the nonce dict with the SPEC §5
+    -- caveat noted there.
+    self.store = cstore.new({ grants = grants, nonces = nonces, rl = ngx.shared.jit_rl })
   end
   -- registry + per-service allow-lists + nonce key, materialized by init()
   local tokens = self.internalstore and self.internalstore:get("plugin_jitaccess_registry", true) or {}
@@ -65,6 +88,9 @@ end
 
 -- init phase (init_by_lua): parse settings once, store for the request path.
 function jitaccess:init()
+  if CORE_ERR then
+    return self:ret(false, "jitaccess core failed to load (run adapters/bunkerweb/build-vendor.sh): " .. CORE_ERR)
+  end
   local variables, err = get_multiple_variables({ "USE_JIT_ACCESS", "JIT_ACCESS_TOKENS", "JIT_ACCESS_TOKEN" })
   if not variables then
     return self:ret(false, "can't read jitaccess variables: " .. tostring(err))
@@ -129,8 +155,17 @@ function jitaccess:server_name_canon()
   return ccanon.canon_server_name(sn)
 end
 
+-- Clamped, like the Go engines do at config load. canon_ip now REJECTS an
+-- out-of-range prefix (so a typo cannot mean /128 on one engine and something
+-- else on another), which without this would turn JIT_ACCESS_IPV6_PREFIX=1280
+-- into a site-wide denial of every IPv6 client.
 function jitaccess:ipv6_prefix()
-  return tonumber((self.variables and self.variables["JIT_ACCESS_IPV6_PREFIX"]) or "128") or 128
+  local n = tonumber((self.variables and self.variables["JIT_ACCESS_IPV6_PREFIX"]) or "128") or 128
+  if n < 0 or n > 128 then
+    self.logger:log(ngx.WARN, "jitaccess: JIT_ACCESS_IPV6_PREFIX=" .. tostring(n) .. " out of range, using 128")
+    return 128
+  end
+  return n
 end
 
 function jitaccess:client_ip_canon()
@@ -199,8 +234,10 @@ end
 -- best-effort per-IP rate limit on knock endpoints (shared nonce dict, rl: prefix)
 function jitaccess:rate_ok(ip)
   if not self.rate_limit or self.rate_limit <= 0 or not self.store then return true end
-  local n = self.store.nonces:incr("rl:" .. ip, 1, 0, self.rate_window)
-  if not n then return true end
+  local n = self.store.rl:incr("rl:" .. ip, 1, 0, self.rate_window)
+  -- incr fails when the dict is full or errors. Failing OPEN there means an
+  -- attacker who fills the dict also switches the throttle off, so deny instead.
+  if not n then return false end
   return n <= self.rate_limit
 end
 
@@ -302,16 +339,32 @@ function jitaccess:enroll(sname, ip)
   if type(body) ~= "table" or type(body.code) ~= "string" then
     return self:deny("jit enroll bad request")
   end
+  -- Validate BEFORE burning: enroll_code_consume is single-use, so checking the
+  -- kid afterwards let any hostile POST destroy a valid enrollment code for a
+  -- kid this instance does not serve. Same peek-then-burn order as the three Go
+  -- engines.
+  local peek = self.store:enroll_code_peek(body.code)
+  if not peek or not self.registry:lookup(peek.kid) then
+    return self:deny("jit enroll invalid/used code")
+  end
   local rec = self.store:enroll_code_consume(body.code)   -- single-use
   if not rec then return self:deny("jit enroll invalid/used code") end
   local token = self.registry:lookup(rec.kid)
   if not token then return self:deny("jit enroll unknown kid") end
+  -- Cache-Control FIRST, before any secret-bearing header. These assignments are
+  -- inside a pcall, so a malformed origins list (table.concat over a non-string)
+  -- used to abort the block AFTER X-JIT-Secret was set but BEFORE no-store was —
+  -- emitting a long-term device secret with no cache directive at all.
+  ngx.header["Cache-Control"] = "no-store"
   pcall(function()
     ngx.header["X-JIT-Kid"] = rec.kid
     ngx.header["X-JIT-Secret"] = ccrypto.b64u_encode(token.secret)
     ngx.header["X-JIT-Alg"] = token.alg or "HMAC-SHA256"
-    ngx.header["X-JIT-Origins"] = table.concat(rec.origins or {}, ",")
-    ngx.header["Cache-Control"] = "no-store"
+    local origins = {}
+    for _, o in ipairs(rec.origins or {}) do
+      if type(o) == "string" then origins[#origins + 1] = o end
+    end
+    ngx.header["X-JIT-Origins"] = table.concat(origins, ",")
   end)
   self:metric("counters", "jit_enroll_ok", 1)
   return self:ret(true, "jit enroll ok", ngx.HTTP_NO_CONTENT)
@@ -340,6 +393,13 @@ function jitaccess:_access()
   local v = self.variables
   if not v or v["USE_JIT_ACCESS"] ~= "yes" then
     return self:ret(true, "jit disabled")
+  end
+  -- The gate is enabled for this service but the core never loaded. Denying is
+  -- the only safe answer: the alternative is serving a service the operator
+  -- believes is dark.
+  if CORE_ERR then
+    self.logger:log(ngx.ERR, "jitaccess core failed to load, denying: " .. CORE_ERR)
+    return self:ret(true, "jit core unavailable (deny)", deny_status())
   end
   if not self.store then
     return self:ret(true, "jit store unavailable (deny)", deny_status())
@@ -391,6 +451,9 @@ function jitaccess:api()
   if uri:sub(1, 11) ~= "/jitaccess/" then
     return self:ret(false, "not a jitaccess endpoint")
   end
+  if CORE_ERR then
+    return self:ret(true, "jitaccess core unavailable: " .. CORE_ERR, ngx.HTTP_INTERNAL_SERVER_ERROR)
+  end
   if not self.store then
     return self:ret(true, "jit store unavailable", ngx.HTTP_INTERNAL_SERVER_ERROR)
   end
@@ -418,6 +481,13 @@ function jitaccess:api()
     local service, ip = target()
     local ttl = tonumber(body.ttl) or 3600
     if not service or not ip then return self:ret(true, "service and valid ip required", ngx.HTTP_BAD_REQUEST) end
+    -- A manual grant has no browser to bind to, so an ip+cookie record would be
+    -- one is_allowed can never honour — while the API cheerfully reported
+    -- granted: true. Force ip binding rather than minting a dead record.
+    if body.binding == "ip+cookie" then
+      return self:ret(true, cjson.encode({ error = "binding ip+cookie is not valid for a manual grant" }),
+        ngx.HTTP_BAD_REQUEST)
+    end
     local rec = cstore.record(service, ip, body.kid or "__manual__", ttl,
                               { manual = true, binding = body.binding or "ip" })
     local ok, err = self.store:put_grant(service, ip, rec, ttl)

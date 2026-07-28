@@ -62,6 +62,13 @@ func CanonIP(addr string, v6Prefix, v4Prefix int) (string, error) {
 	}
 	a = a.Unmap()
 
+	// Bounds are checked BEFORE the >= full shortcut. With the check after it, a
+	// config typo of 1280 silently behaved as /128 here while the Lua core
+	// rejected it outright — the same registry admitting a client on one engine
+	// and denying it on another. Fail closed on nonsense config.
+	if v6Prefix < 0 || v6Prefix > 128 || v4Prefix < 0 || v4Prefix > 32 {
+		return "", errors.New("canon_ip: prefix out of range")
+	}
 	prefix := v6Prefix
 	full := 128
 	if a.Is4() {
@@ -69,9 +76,6 @@ func CanonIP(addr string, v6Prefix, v4Prefix int) (string, error) {
 	}
 	if prefix >= full {
 		return a.String(), nil
-	}
-	if prefix < 0 {
-		return "", errors.New("canon_ip: negative prefix")
 	}
 	p, err := a.Prefix(prefix)
 	if err != nil {

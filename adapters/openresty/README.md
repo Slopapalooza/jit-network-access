@@ -88,7 +88,12 @@ over TLS at `/enroll`.
 - **Revoking a device:** remove its `token` entry and reload. Grants are
   re-checked against the registry on every request, so the device is evicted on
   its next request rather than at TTL.
-- **Fail-closed:** the whole access path is wrapped in `pcall`; any error denies.
+- **Fail-closed:** the whole access path is wrapped in `pcall`, so any thrown
+  error denies. A `pcall` cannot see a clean early return, so the "`init()`
+  never ran" case — a missing or mistyped `init_by_lua_block` include — is
+  checked explicitly and denies with an `ERR` log line. If you see
+  `jitaccess: not initialized` in the error log, the gate is refusing everything
+  because it was never configured, not because the client failed the knock.
 
 ## Status
 

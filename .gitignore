@@ -6,6 +6,9 @@ venv/
 
 # Node / extension
 node_modules/
+# Build output. Release artifacts are ATTACHED to a GitHub release, not
+# committed: a .crx in git history is a binary nobody can review in a diff, and
+# it goes stale the moment the source moves.
 extension/dist/
 *.zip
 *.crx

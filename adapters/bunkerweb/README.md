@@ -100,3 +100,37 @@ Two consequences to know:
   has e.g. port 22 open. Not a jitaccess issue.
 - If you need a specific order, set `PLUGINS_ORDER_ACCESS` explicitly. The default
   (external plugins appended) already places jitaccess last, which is what you want.
+
+## Denials and badbehavior
+
+A jitaccess denial is an ordinary `403` (or a `404` in stealth mode), so
+BunkerWeb's `badbehavior` plugin counts it exactly like any other 403 — its
+default `BAD_BEHAVIOR_STATUS_CODES` includes `403`. There is no per-plugin
+exemption, and an earlier version of the `JIT_ACCESS_RATELIMIT` help text
+claimed one existed. It does not.
+
+Why that matters: a dark service denies *by design*, and the denials are not
+necessarily the client's fault.
+
+- A hostile page can embed `<img src="https://your-dark-host/x">` a dozen times.
+  Those requests come from the victim's browser, each is denied, and
+  `badbehavior` bans the **victim's** IP instance-wide — across services that
+  have nothing to do with JIT — for `BAD_BEHAVIOR_BAN_TIME` (24 h by default).
+- On shared egress (office NAT, CGNAT, VPN) one un-enrolled colleague hitting the
+  service repeatedly can get the whole office banned.
+
+Pick one of these:
+
+- **Raise the threshold** so ordinary denial volume cannot reach it:
+  `BAD_BEHAVIOR_COUNT_THRESHOLD` well above the number of denials a normal
+  browser generates for one page load (a page with sub-resources can produce
+  several).
+- **Drop 403 from the counted set** on JIT-enabled services:
+  `BAD_BEHAVIOR_STATUS_CODES: "400 401 405 429 444"`.
+- **Use `stealth`** failure mode, so denials are `404` — which is not in the
+  default counted set — at the cost of the `X-JIT-Access` marker the extension
+  uses for its recovery path.
+
+The knock endpoints have their own per-IP throttle (`JIT_ACCESS_RATELIMIT`), and
+that one answers a throttled request with the same generic denial as everything
+else, so it never reveals which paths are protocol endpoints.

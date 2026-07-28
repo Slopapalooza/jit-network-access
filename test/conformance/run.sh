@@ -35,6 +35,47 @@ echo "$o" | sed 's/^/    /'
 expect "app-b knock accepted" "KNOCK 204" "$o"
 expect "app-b service unlocked" "SERVICE 200" "$o"
 
+# ---- security conformance (M2.5) ------------------------------------------
+# PROTOCOL §9: an implementation is conformant only when it passes the SECURITY
+# profile too — "functional pass alone is not sufficient". Both suites below
+# existed but were wired into no runner, so in practice only the functional
+# knock above ever ran, and the security probes were executed by hand if at all.
+#
+# --api/--api-token are optional but STRONGLY recommended: without them the
+# probes that need to set up a victim grant report themselves as SETUP FAILED
+# rather than passing vacuously.
+API_ARGS=""
+if [ -n "${API_URL:-}" ] && [ -n "${API_TOKEN:-}" ]; then
+  API_ARGS="--api $API_URL --api-token $API_TOKEN"
+else
+  echo
+  echo "NOTE: set API_URL and API_TOKEN to enable the probes that need the instance API."
+fi
+
+echo
+echo "== security conformance suite =="
+if python3 "$here/security_suite.py"      --a-url "https://app-a.local:$PORT" --a-resolve "app-a.local:$PORT:127.0.0.1"      --a-kid kid_a_test --a-secret "$SEC_A" --a-name app-a.local      --b-url "https://app-b.local:$PORT" --b-resolve "app-b.local:$PORT:127.0.0.1"      --b-name app-b.local --b-kid kid_b_test --b-secret "$SEC_B"      ${PEER_IP:+--peer-ip "$PEER_IP"} $API_ARGS; then
+  pass=$((pass+1)); echo "  PASS: security suite"
+else
+  fail=$((fail+1)); echo "  FAIL: security suite"
+fi
+
+# ---- ip+cookie binding ----------------------------------------------------
+# cookie_binding.py asserts the six properties of the device-bound grant
+# (__Host- prefix, Secure, HttpOnly, SameSite=Strict, opacity, entropy). It was
+# wired into no runner at all, so those properties were only ever checked by
+# hand. It needs a service configured with binding: ip+cookie over HTTPS —
+# app-a in the harness qualifies once JIT_ACCESS_BINDING is set for it.
+if [ "${COOKIE_BINDING:-1}" = "1" ]; then
+  echo
+  echo "== ip+cookie binding =="
+  if python3 "$here/cookie_binding.py" --url "https://app-c.local:$PORT"        --resolve "app-c.local:$PORT:127.0.0.1"        --kid kid_a_test --secret "$SEC_A" --host app-c.local; then
+    pass=$((pass+1)); echo "  PASS: ip+cookie binding (app-c)"
+  else
+    fail=$((fail+1)); echo "  FAIL: ip+cookie binding (is app-c.local up with JIT_ACCESS_BINDING=ip+cookie?)"
+  fi
+fi
+
 echo
 echo "RESULT: $pass passed, $fail failed"
 [ "$fail" -eq 0 ] && echo "M2 conformance GREEN" || { echo "M2 conformance RED"; exit 1; }

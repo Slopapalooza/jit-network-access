@@ -3,6 +3,7 @@
 # Two multisite services behind one BunkerWeb instance:
 #   app-a.local  -> whoami-a   JIT interstitial mode
 #   app-b.local  -> whoami-b   JIT stealth mode
+#   app-c.local  -> whoami-c   JIT interstitial, ip+cookie (device-bound)
 # A `tester` container on the bw-universe network drives the curl matrix so every
 # request has a stable source IP (which is what a grant is keyed to in Simple
 # mode — no real-IP, the TCP peer).
@@ -34,7 +35,7 @@ services:
       BUNKERWEB_INSTANCES: "bunkerweb"
       API_WHITELIST_IP: "127.0.0.0/8 10.20.30.0/24"
       MULTISITE: "yes"
-      SERVER_NAME: "app-a.local app-b.local"
+      SERVER_NAME: "app-a.local app-b.local app-c.local"
       USE_REVERSE_PROXY: "yes"
       # Keep logs quiet-ish and startup fast for a test rig
       LOG_LEVEL: "notice"
@@ -51,6 +52,11 @@ services:
       app-a.local_JIT_ACCESS_TOKENS: "kid_a_test"
       app-a.local_JIT_ACCESS_FAILURE_MODE: "interstitial"
       app-a.local_JIT_ACCESS_GRANT_TIME: "120"
+      # Stays plain `ip`. Making app-a device-bound broke two shipped assertions
+      # ("app-a service unlocked -> SERVICE 200" and "peer-granted request
+      # ignores XFF (still 200)") because neither knock_client nor the security
+      # suite persists the grant cookie, so their cookieless follow-up GET is
+      # correctly denied. app-c below carries the ip+cookie coverage instead.
       app-a.local_USE_REVERSE_SCAN: "no"
       app-a.local_USE_LIMIT_REQ: "no"
 
@@ -62,11 +68,32 @@ services:
       app-b.local_JIT_ACCESS_GRANT_TIME: "120"
       app-b.local_USE_REVERSE_SCAN: "no"
       app-b.local_USE_LIMIT_REQ: "no"
+
+      # --- app-c: JIT interstitial, DEVICE-BOUND (ip+cookie) ---
+      # Exists so test/conformance/cookie_binding.py has a live target for the
+      # six cookie properties it asserts (__Host- prefix, Secure, HttpOnly,
+      # SameSite=Strict, opacity, entropy). Kept as a THIRD service rather than
+      # flipping app-a, so every probe written against app-a keeps meaning what
+      # it says.
+      app-c.local_REVERSE_PROXY_HOST: "http://whoami-c:80"
+      app-c.local_USE_JIT_ACCESS: "yes"
+      app-c.local_JIT_ACCESS_TOKENS: "kid_a_test"
+      app-c.local_JIT_ACCESS_FAILURE_MODE: "interstitial"
+      app-c.local_JIT_ACCESS_BINDING: "ip+cookie"
+      app-c.local_JIT_ACCESS_GRANT_TIME: "120"
+      app-c.local_USE_REVERSE_SCAN: "no"
+      app-c.local_USE_LIMIT_REQ: "no"
     networks:
       - bw-universe
     restart: unless-stopped
 
   whoami-a:
+    image: traefik/whoami
+    networks:
+      - bw-services
+    restart: unless-stopped
+
+  whoami-c:
     image: traefik/whoami
     networks:
       - bw-services

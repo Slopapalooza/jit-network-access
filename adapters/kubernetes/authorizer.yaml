@@ -18,12 +18,34 @@ stringData:
   # The whole Authorizer config. Device secrets live here, so it is a Secret
   # rather than a ConfigMap — restrict it with RBAC and consider a sealed/
   # external secret in production.
+  #
+  # NOTE: the Authorizer parses this with DisallowUnknownFields — an unrecognised
+  # key is a startup error, so keep explanatory notes here in YAML, never inside
+  # the JSON below.
+  #
+  # admin_token is deliberately ABSENT. The admin API mints grants that skip the
+  # registry re-check, so a shipped placeholder value is a cluster-wide backdoor
+  # for every operator who never changed it. With no admin_token configured the
+  # /admin/* surface refuses every request. To enable it: generate a value
+  # (openssl rand -base64 32), add "admin_token": "<value>" below, and keep the
+  # NetworkPolicy at the end of this file so only the ingress controller can
+  # reach the port at all.
+  #
+  # trusted_proxies MUST be the ingress controller's POD CIDR — not all of
+  # RFC1918. Two separate reasons:
+  #   1. /authz and /admin refuse peers outside this list. Every pod in the
+  #      cluster sits inside 10/8 by default, so listing 10/8 makes that check a
+  #      no-op and any workload in the cluster can drive the gate.
+  #   2. Resolving the client IP SKIPS every candidate inside this list. With
+  #      10/8 trusted, on-prem clients on 10.x are all skipped, everyone falls
+  #      back to the controller's own address, and they SHARE a single grant —
+  #      one person knocks and everybody is admitted.
+  # Find the real CIDR with: kubectl -n ingress-nginx get pods -o wide
   config.json: |
     {
       "listen": "0.0.0.0:8998",
-      "admin_token": "CHANGE-ME-openssl-rand-base64-32",
 
-      "trusted_proxies": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
+      "trusted_proxies": ["10.42.0.0/16"],
       "real_ip_header": "X-Forwarded-For",
 
       "grant_ttl": 3600,
@@ -70,6 +92,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 65532
         fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: authorizer
           # Build with: docker build -t <registry>/jitaccess-authorizer:0.1.0 authorizer/
@@ -114,3 +138,33 @@ spec:
     - name: http
       port: 8998
       targetPort: http
+---
+# A ClusterIP is reachable from EVERY pod in the cluster, so "not routable from
+# outside" is not by itself a control: any workload could otherwise call /authz
+# with headers of its choosing, or POST /admin/grant once an admin_token exists.
+# This restricts :8998 to the ingress controller, which is the only client that
+# has any business talking to it.
+#
+# Adjust the namespace selector to match your controller's namespace label. On
+# Kubernetes 1.22+ every namespace carries kubernetes.io/metadata.name
+# automatically; older clusters need the label added by hand.
+#
+# A default-deny ingress rule for the namespace is implied: once ANY
+# NetworkPolicy selects a pod, only what is explicitly allowed reaches it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: jit-authorizer
+  namespace: jit-system
+spec:
+  podSelector:
+    matchLabels: { app: jit-authorizer }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8998

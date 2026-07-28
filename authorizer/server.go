@@ -5,6 +5,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -36,6 +37,8 @@ type Server struct {
 	rl       *rateLimiter
 	metrics  *metrics
 	now      func() int64 // injectable for tests
+
+	mux http.Handler // routing table for the CURRENT config; rebuilt by Reload
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -75,6 +78,14 @@ func (s *Server) registry() *jitcore.Registry {
 
 // Reload swaps config + registry atomically; live grants survive but are
 // re-checked against the new registry on their next request (SPEC §4.3).
+//
+// The routing table is rebuilt too. It used to be captured once at startup, so a
+// SIGHUP that changed uri_prefix left the mux serving the OLD prefix while
+// /authz carved out the NEW one — the knock endpoints became unreachable and the
+// service locked itself out until someone restarted it.
+//
+// listen/admin_listen cannot be applied without rebinding sockets, so a reload
+// that changes them is REFUSED rather than half-applied.
 func (s *Server) Reload(cfg *Config) error {
 	reg, err := cfg.Registry()
 	if err != nil {
@@ -82,24 +93,76 @@ func (s *Server) Reload(cfg *Config) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if cfg.Listen != s.cfg.Listen {
+		return fmt.Errorf("listen changed (%q -> %q): restart required, not a reload", s.cfg.Listen, cfg.Listen)
+	}
+	if cfg.AdminListen != s.cfg.AdminListen {
+		return fmt.Errorf("admin_listen changed (%q -> %q): restart required, not a reload", s.cfg.AdminListen, cfg.AdminListen)
+	}
 	s.cfg, s.reg = cfg, reg
+	s.mux = s.buildMuxLocked()
 	return nil
 }
 
+// Handler is the main listener: the protocol endpoints plus forward-auth.
+//
+// /admin/* is mounted here ONLY when admin_listen is empty. Configuring
+// admin_listen moves it to its own listener (see AdminHandler) so the admin API
+// can be bound somewhere the proxy cannot reach at all — the field was
+// previously parsed, documented as doing exactly that, and then never read, so
+// an operator who set it silently kept the admin API on the main port.
+// Handler returns a STABLE handler that dispatches through whatever routing
+// table the current config implies, so http.Server can be built once while
+// SIGHUP still takes effect.
 func (s *Server) Handler() http.Handler {
+	s.mu.Lock()
+	if s.mux == nil {
+		s.mux = s.buildMuxLocked()
+	}
+	s.mu.Unlock()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.RLock()
+		h := s.mux
+		s.mu.RUnlock()
+		h.ServeHTTP(w, r)
+	})
+}
+
+// buildMuxLocked constructs the routing table. Caller holds s.mu.
+func (s *Server) buildMuxLocked() http.Handler {
 	mux := http.NewServeMux()
-	prefix := s.config().URIPrefix
+	prefix := s.cfg.URIPrefix
 
 	mux.HandleFunc(prefix+"/challenge", s.handleChallenge)
 	mux.HandleFunc(prefix+"/respond", s.handleRespond)
 	mux.HandleFunc(prefix+"/enroll", s.handleEnroll)
+	mux.HandleFunc(prefix+"/register", s.handleRegister)
 	mux.HandleFunc("/authz", s.handleAuthz)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("/admin/", s.handleAdmin)
+	if s.cfg.AdminListen == "" {
+		mux.HandleFunc("/admin/", s.handleAdmin)
+	}
 	// Anything else reaching the Authorizer directly is not part of the
 	// protocol; answer 404 rather than leaking that this is a JIT gate.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+	return mux
+}
+
+// AdminHandler serves only /admin/* and /healthz, for the separate admin
+// listener. Returns nil when admin_listen is not configured.
+func (s *Server) AdminHandler() http.Handler {
+	if s.config().AdminListen == "" {
+		return nil
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/admin/", s.handleAdmin)
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	})
@@ -111,40 +174,54 @@ func (s *Server) Handler() http.Handler {
 type reqCtx struct {
 	service string
 	ip      string
+	uri     string // normalized path of the ORIGINAL request
 	svc     ServiceConfig
 	known   bool
 }
 
+// resolve identifies the request: who the client is, which service it is for,
+// and what path it asked for. Anything ambiguous returns false, and every caller
+// treats that as a denial — including the case where two forwarding conventions
+// disagree about the target, which means a client appended a header the proxy
+// also sets (see Config.resolveTarget).
 func (s *Server) resolve(r *http.Request) (*reqCtx, bool) {
 	cfg := s.config()
 	ip, _, err := cfg.ClientIP(r)
 	if err != nil || ip == "" {
 		return nil, false
 	}
-	service := cfg.ServiceName(r)
-	if service == "" {
+	service, uri, conflict := cfg.resolveTarget(r)
+	if conflict || service == "" {
 		return nil, false
 	}
 	svc, known := cfg.Service(service)
-	return &reqCtx{service: service, ip: ip, svc: svc, known: known}, true
+	return &reqCtx{service: service, ip: ip, uri: uri, svc: svc, known: known}, true
 }
 
 // ---- protocol: challenge ---------------------------------------------------
 
 func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "", http.StatusMethodNotAllowed)
-		return
-	}
 	c, ok := s.resolve(r)
 	if !ok || !c.known {
 		s.deny(w, r, c, "unknown service")
 		return
 	}
+	// Wrong method answers the SAME generic response as everything else. A 405
+	// here told a prober "this exact path exists" — in stealth mode the protocol
+	// paths returned 405 while every other path returned 404, so the gate was
+	// locatable in a handful of requests (PROTOCOL §6).
+	if r.Method != http.MethodGet {
+		s.deny(w, r, c, "method")
+		return
+	}
 	cfg := s.config()
 	if !s.rl.allow(c.ip, cfg.RateLimit, s.now()) {
-		s.metrics.inc(&s.metrics.knockFail)
-		http.Error(w, "", http.StatusTooManyRequests)
+		// deny(), not a bare 429: PROTOCOL §6 requires every rejection at these
+		// endpoints to be the SAME generic response. A 429 here was a free
+		// endpoint-discovery oracle — in stealth mode the protocol paths answered
+		// 429 while every other path answered 404, so a handful of requests
+		// located the gate.
+		s.knockFail(w, r, c, "rate limited")
 		return
 	}
 	rnd, err := jitcore.RandomBytes(16)
@@ -174,19 +251,23 @@ type respondBody struct {
 }
 
 func (s *Server) handleRespond(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "", http.StatusMethodNotAllowed)
-		return
-	}
 	c, ok := s.resolve(r)
 	if !ok || !c.known {
 		s.deny(w, r, c, "unknown service")
 		return
 	}
+	if r.Method != http.MethodPost {
+		s.deny(w, r, c, "method") // generic response, never a distinguishable 405
+		return
+	}
 	cfg := s.config()
 	if !s.rl.allow(c.ip, cfg.RateLimit, s.now()) {
-		s.metrics.inc(&s.metrics.knockFail)
-		http.Error(w, "", http.StatusTooManyRequests)
+		// deny(), not a bare 429: PROTOCOL §6 requires every rejection at these
+		// endpoints to be the SAME generic response. A 429 here was a free
+		// endpoint-discovery oracle — in stealth mode the protocol paths answered
+		// 429 while every other path answered 404, so a handful of requests
+		// located the gate.
+		s.knockFail(w, r, c, "rate limited")
 		return
 	}
 
@@ -256,7 +337,14 @@ func (s *Server) handleRespond(w http.ResponseWriter, r *http.Request) {
 			MaxAge:   int(ttl),
 		})
 	}
-	s.grants.Put(g)
+	// If this browser already held a grant cookie for this (service, ip), its
+	// record lives under a different key — retire it rather than leaving a dead
+	// record behind on every re-knock.
+	oldHash := ""
+	if ck, err := r.Cookie(GrantCookieName); err == nil && ck.Value != "" {
+		oldHash = jitcore.CookieHash(ck.Value)
+	}
+	s.grants.Put(g, oldHash)
 	s.metrics.inc(&s.metrics.knockOK)
 
 	w.Header().Set("Cache-Control", "no-store")
@@ -279,18 +367,32 @@ type enrollBody struct {
 }
 
 func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "", http.StatusMethodNotAllowed)
-		return
-	}
 	c, ok := s.resolve(r)
 	if !ok || !c.known {
 		s.deny(w, r, c, "unknown service")
 		return
 	}
+	if r.Method != http.MethodPost {
+		s.deny(w, r, c, "method") // generic response, never a distinguishable 405
+		return
+	}
+	// PROTOCOL §2.1 requires this endpoint to be rate-limited, and it is the
+	// highest-value target in the protocol: it trades a code for a long-term
+	// device secret. It was the one knock endpoint with no throttle at all.
+	if !s.rl.allow(c.ip, s.config().RateLimit, s.now()) {
+		s.knockFail(w, r, c, "rate limited")
+		return
+	}
 	var body enrollBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil || body.Code == "" {
 		s.deny(w, r, c, "bad enroll body")
+		return
+	}
+	// Validate BEFORE consuming: Consume is delete-after-read, so checking the
+	// kid afterwards let any hostile POST destroy a valid enrollment code.
+	if peek := s.codes.Peek(body.Code, s.now()); peek == nil || s.registry().Lookup(peek.Kid) == nil {
+		s.metrics.inc(&s.metrics.knockFail)
+		s.deny(w, r, c, "code rejected")
 		return
 	}
 	code := s.codes.Consume(body.Code, s.now()) // single-use, delete-after-read
@@ -310,6 +412,28 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	s.metrics.inc(&s.metrics.enrollOK)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleRegister answers the registration link for a browser WITHOUT the
+// extension. With the extension installed, its service worker intercepts that
+// navigation before the request leaves the browser, so this handler is only ever
+// reached by someone who needs to install it — see registerHTML.
+//
+// It is served on the protected origin (inside the prefix carve-out) so it works
+// while the service is dark, and it is deliberately identical whatever code is
+// in the URL: no oracle for whether an enrollment code exists or is still valid.
+func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	// The URL carries a single-use code; keep it out of the referrer of anything
+	// the page links to.
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(registerHTML)
 }
 
 // ---- forward-auth ----------------------------------------------------------
@@ -333,8 +457,16 @@ func (s *Server) handleAuthz(w http.ResponseWriter, r *http.Request) {
 
 	// The knock endpoints must stay reachable on a dark service, so a subrequest
 	// for them is allowed through to the Authorizer's own protocol handlers.
-	uri := OriginalURI(r)
-	if p := cfg.URIPrefix; uri == p || strings.HasPrefix(uri, p+"/") {
+	// c.uri is normalized and comes from a conventions-agree-or-deny resolution,
+	// so this is the same path the proxy will route on.
+	uri := c.uri
+	// Only paths BELOW the prefix are carved out, never the bare prefix itself.
+	// The shipped recipes route `location /.well-known/jit-access/` (with the
+	// trailing slash) to the Authorizer, so the bare path falls into `location /`
+	// — gated — and answering 204 for it made it an ungated pass-through to the
+	// backend on that one path, with attacker-chosen method, query and body.
+	// Nothing needs the bare form: it is not an endpoint.
+	if p := cfg.URIPrefix; strings.HasPrefix(uri, p+"/") {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -364,15 +496,24 @@ func (s *Server) handleAuthz(w http.ResponseWriter, r *http.Request) {
 // deny renders the configured failure mode. interstitial = 403 + marker header
 // (the extension's detection hook); stealth = bare 404.
 func (s *Server) deny(w http.ResponseWriter, r *http.Request, c *reqCtx, reason string) {
-	mode := FailInterstitial
-	if c != nil {
-		mode = s.config().failureMode(c.svc)
+	cfg := s.config()
+	mode := cfg.defaultFailureMode()
+	// c.known matters, not just c != nil: an unrecognised Host resolves fine but
+	// carries a ZERO ServiceConfig, and failureMode("") reads as interstitial —
+	// so on a stealth-only deployment any request with an unknown Host answered
+	// with the branded page and the X-JIT-Access marker, advertising a gate the
+	// operator made invisible.
+	if c != nil && c.known {
+		mode = cfg.failureMode(c.svc)
 	}
-	w.Header().Set("Cache-Control", "no-store")
 	if mode == FailStealth {
-		w.WriteHeader(http.StatusNotFound)
+		// Must be INDISTINGUISHABLE from the platform's own 404 (PROTOCOL §6),
+		// so no Cache-Control and no empty body: http.NotFound is exactly what
+		// the mux serves for an unrouted path, headers and body alike.
+		http.NotFound(w, r)
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-JIT-Access", JITMarker)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusForbidden)

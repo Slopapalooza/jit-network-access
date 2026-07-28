@@ -100,7 +100,7 @@
     "JIT_ACCESS_RATELIMIT": {
       "context": "global",
       "default": "10r/m",
-      "help": "Rate limit for the knock endpoints per source IP. Tune above office/CGNAT scale if many users share an egress IP. Knock failures never feed badbehavior.",
+      "help": "Rate limit for the knock endpoints per source IP; a rejection looks like any other denial, never a distinguishable 429. Tune above office/CGNAT scale if many users share an egress IP. NOTE: jitaccess denials are ordinary 403s, so badbehavior counts them like any other 403 — see 'Denials and badbehavior' in the plugin README before leaving both at their defaults.",
       "id": "jit-access-ratelimit",
       "label": "Knock endpoint rate limit",
       "regex": "^[1-9][0-9]*r/[smhd]$",

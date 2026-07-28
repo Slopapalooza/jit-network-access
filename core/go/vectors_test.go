@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
-	"strings"
 	"testing"
 )
 
@@ -38,6 +37,7 @@ type vectors struct {
 		V6Prefix int    `json:"v6_prefix"`
 		V4Prefix int    `json:"v4_prefix"`
 		Out      string `json:"out"`
+		Valid    bool   `json:"valid"`
 	} `json:"canon_ip"`
 	Proof []struct {
 		SecretHex       string `json:"secret_hex"`
@@ -139,9 +139,12 @@ func TestCanonIPVectors(t *testing.T) {
 	}
 	for _, tc := range v.CanonIP {
 		got, err := CanonIP(tc.In, tc.V6Prefix, tc.V4Prefix)
-		// The generator records rejected inputs as "<invalid: ...>"; those MUST
-		// error here rather than canonicalize to something.
-		if strings.HasPrefix(tc.Out, "<invalid") {
+		// `valid: false` marks an input every implementation MUST reject (e.g. a
+		// leading-zero IPv4 octet, PROTOCOL §4 step 1) rather than canonicalize
+		// to something. This used to be a prose sentinel carrying a Python
+		// exception string, which no other language could reproduce — so
+		// consumers improvised and the Lua runner skipped these entirely.
+		if !tc.Valid {
 			if err == nil {
 				t.Errorf("canon_ip(%q): expected rejection, got %q", tc.In, got)
 			}

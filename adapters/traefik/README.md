@@ -35,8 +35,13 @@ Two rules make it work:
 1. **The protocol endpoints need their own router at a higher priority**, with
    *no* `jit-access` middleware attached. Otherwise a device that is not yet
    granted could never reach `/challenge` to become granted.
-2. **`authResponseHeaders` must include `Set-Cookie`** if you use
-   `binding: ip+cookie`, or the grant cookie never reaches the browser.
+2. **`authResponseHeaders` does NOT carry the grant cookie.** It copies headers
+   from the auth response onto the request forwarded UPSTREAM, not onto the
+   response sent to the browser. The grant cookie is set by the knock (`POST
+   <prefix>/respond`), which the recipe routes to the Authorizer through the
+   ungated high-priority router, so it reaches the browser directly. Listing
+   `Set-Cookie` here injects a meaningless request header into your backend;
+   it is harmless but it is not what makes `ip+cookie` work.
 
 ## Security notes
 
