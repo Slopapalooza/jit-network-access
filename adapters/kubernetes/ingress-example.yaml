@@ -40,9 +40,25 @@ metadata:
   annotations:
     # THE GATE: every request is authorized by the Authorizer first.
     nginx.ingress.kubernetes.io/auth-url: "http://jit-authorizer.jit-system.svc.cluster.local:8998/authz"
-    # Required for binding: "ip+cookie" — carries the grant cookie back to the
-    # browser. Harmless with plain ip binding.
-    nginx.ingress.kubernetes.io/auth-response-headers: "Set-Cookie, X-JIT-Kid"
+    # X-JIT-Kid is passed to the backend for logging. Set-Cookie is listed for
+    # completeness only: /authz never sets one. The grant cookie is set by the
+    # knock (POST <prefix>/respond), which goes to the Authorizer through the
+    # UNGATED protocol Ingress above and reaches the browser directly — it is not
+    # an auth subrequest, so auth-response-headers has nothing to do with it.
+    nginx.ingress.kubernetes.io/auth-response-headers: "X-JIT-Kid"
+    # ingress-nginx forwards the CLIENT's own headers on the auth subrequest, and
+    # the controller pod is inside trusted_proxies. The real origin travels in
+    # X-Original-URL, which the controller always sets; blanking the other
+    # conventions means a client cannot describe the request a second, different
+    # way. The Authorizer denies when two conventions disagree, so omitting this
+    # snippet is no longer a bypass — a forged header makes the client's OWN
+    # request fail instead. Keep it anyway: it turns a confusing denial into a
+    # clean one, and defence in depth here is free.
+    nginx.ingress.kubernetes.io/auth-snippet: |
+      proxy_set_header X-Forwarded-Host "";
+      proxy_set_header X-Original-Host "";
+      proxy_set_header X-Forwarded-Uri "";
+      proxy_set_header X-Original-Uri "";
 spec:
   ingressClassName: nginx
   rules:

@@ -65,7 +65,8 @@ type Config struct {
 	Services map[string]ServiceConfig `json:"services"`
 	Tokens   []TokenConfig            `json:"tokens"`
 
-	trusted []netip.Prefix // parsed TrustedProxies
+	trusted       []netip.Prefix           // parsed TrustedProxies
+	canonServices map[string]ServiceConfig // Services keyed by canonical name (collision-checked)
 }
 
 func DefaultConfig() *Config {
@@ -160,6 +161,27 @@ func (c *Config) finalize() error {
 			return fmt.Errorf("token %s: secret must be >= 16 bytes", t.Kid)
 		}
 	}
+	// Two DISTINCT json keys can collapse to one canonical name ("app.example.com"
+	// and "app.example.com:8443" both canonicalize to the former). Registry() then
+	// wrote both into one map slot and Service() returned whichever Go's RANDOMIZED
+	// map iteration reached first — so which allow-list and which failure_mode were
+	// in effect changed from one process start to the next, with no config change
+	// and no log line. Reject the collision instead; duplicate kids are already
+	// rejected above for the same reason.
+	byCanon := map[string]string{}
+	for name := range c.Services {
+		canon := jitcore.CanonServerName(name)
+		if prev, dup := byCanon[canon]; dup {
+			return fmt.Errorf("services %q and %q both canonicalize to %q — "+
+				"they would be one service with a nondeterministic policy; keep one", prev, name, canon)
+		}
+		byCanon[canon] = name
+	}
+	c.canonServices = make(map[string]ServiceConfig, len(c.Services))
+	for name, svc := range c.Services {
+		c.canonServices[jitcore.CanonServerName(name)] = svc
+	}
+
 	for name, svc := range c.Services {
 		switch svc.FailureMode {
 		case "", FailInterstitial, FailStealth:
@@ -188,25 +210,38 @@ func (c *Config) Registry() (*jitcore.Registry, error) {
 			Secret: sec, Alg: jitcore.AlgHMACSHA256, Label: t.Label, Expires: t.Expires,
 		}
 	}
+	// Built from the pre-canonicalized map finalize() produced, which is collision
+	// free — so this cannot depend on map iteration order.
 	services := map[string]map[string]bool{}
-	for name, svc := range c.Services {
+	for canon, svc := range c.canonServices {
 		allow := map[string]bool{}
 		for _, kid := range svc.Tokens {
 			allow[kid] = true
 		}
-		services[jitcore.CanonServerName(name)] = allow
+		services[canon] = allow
 	}
 	return jitcore.NewRegistry(tokens, services), nil
 }
 
 // Service returns the config for a canonical service name.
 func (c *Config) Service(canon string) (ServiceConfig, bool) {
-	for name, svc := range c.Services {
-		if jitcore.CanonServerName(name) == canon {
-			return svc, true
+	svc, ok := c.canonServices[canon]
+	return svc, ok
+}
+
+// defaultFailureMode is what deny() uses when the request could not be resolved
+// to a service at all (unknown host, conventions in conflict). It returns the
+// STRICTER of the modes configured, so a deployment that asked for stealth
+// anywhere never answers an unresolvable request with the branded interstitial
+// and the X-JIT-Access marker — which would advertise a gate the operator
+// deliberately made invisible.
+func (c *Config) defaultFailureMode() string {
+	for _, svc := range c.canonServices {
+		if svc.FailureMode == FailStealth {
+			return FailStealth
 		}
 	}
-	return ServiceConfig{}, false
+	return FailInterstitial
 }
 
 func (c *Config) failureMode(svc ServiceConfig) string {

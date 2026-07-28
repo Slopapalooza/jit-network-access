@@ -22,18 +22,14 @@ local mt = { __index = methods }
 local GRANT_PREFIX = "jit:grant:"
 local NONCE_PREFIX = "jit:nonce:"
 
--- Constant-time string equality, implemented locally so this module keeps no
--- crypto dependency. Length is not secret (both sides are fixed-width hex).
-local byte = string.byte
-local function ct_equal(a, b)
-  if type(a) ~= "string" or type(b) ~= "string" or #a ~= #b then return false end
-  local diff = 0
-  for i = 1, #a do
-    local x, y = byte(a, i), byte(b, i)
-    diff = diff + (x == y and 0 or 1)
-  end
-  return diff == 0
-end
+-- Constant-time string equality for the ip+cookie hash comparison.
+--
+-- Delegates to jitaccess.core.crypto rather than keeping a second copy: the
+-- local one accumulated with `(x == y and 0 or 1)`, which branches per byte and
+-- so was not actually constant-time, unlike crypto.ct_equal's branch-free
+-- bor/bxor accumulator and Go's subtle.ConstantTimeCompare. Two implementations
+-- of one primitive is exactly how that drift happens.
+local ct_equal = require("jitaccess.core.crypto").ct_equal
 
 -- opts.grants  : ngx.shared dict for grants        (required, Simple)
 -- opts.nonces  : ngx.shared dict for spent nonces  (required, Simple) — MUST be
@@ -46,14 +42,28 @@ function _M.new(opts)
   return setmetatable({
     grants = opts.grants,
     nonces = opts.nonces,
+    -- Rate-limit counters get their OWN dict. SPEC §5 requires the nonce dict to
+    -- be dedicated to spent-nonce claims: sharing it let an unauthenticated
+    -- attacker mint one counter per source address and LRU-evict spent-nonce
+    -- markers (re-enabling replay inside the TTL) and enrollment codes.
+    -- Falls back to the nonce dict so a caller that has not declared the third
+    -- dict still runs, with the documented caveat.
+    rl     = opts.rl or opts.nonces,
     redis  = opts.redis,     -- HARDENED: nil in Simple mode
     tenant = opts.tenant,    -- HARDENED
   }, mt)
 end
 
-local function grant_key(self, sname_canon, ip_canon)
+-- Key schema (core/SPEC.md §4.1). For ip+cookie binding the cookie hash is part
+-- of the key: without it one (service, ip) pair held exactly ONE grant, so two
+-- enrolled devices behind a single NAT egress evicted each other on every knock
+-- and flapped indefinitely — precisely the deployment ip+cookie exists to serve.
+-- `ip` binding keeps the two-part key, so the default profile is unchanged.
+local function grant_key(self, sname_canon, ip_canon, cookie_hash)
   -- TODO(hardened): if self.tenant then prefix "jit:" .. tenant .. ":grant:" ...
-  return GRANT_PREFIX .. sname_canon .. ":" .. ip_canon
+  local k = GRANT_PREFIX .. sname_canon .. ":" .. ip_canon
+  if cookie_hash then k = k .. ":" .. cookie_hash end
+  return k
 end
 
 -- ---- GrantStore ------------------------------------------------------------
@@ -67,19 +77,31 @@ function methods:put_grant(sname_canon, ip_canon, rec, ttl)
   end
   local json = cjson.encode(rec)
   if not json then return nil, "encode failed" end
-  local ok, err = self.grants:set(grant_key(self, sname_canon, ip_canon), json, ttl)
+  -- A device-bound record is stored under its own cookie-qualified key.
+  local ck = (rec.binding == "ip+cookie") and rec.cookie_hash or nil
+  local ok, err = self.grants:set(grant_key(self, sname_canon, ip_canon, ck), json, ttl)
   if not ok then return nil, err end
   return true
 end
 
 -- Fetch the raw grant record (or nil). The kid/expiry/cookie RE-CHECK required
 -- by SPEC §4.3 is composed in :is_allowed below (it needs the registry + now).
-function methods:get_grant(sname_canon, ip_canon)
+--
+-- cookie_hash, when the client presented one, selects that device's own grant;
+-- otherwise the ip-bound key is used. Looking the hash up (rather than scanning)
+-- means a device can only ever find its OWN record.
+function methods:get_grant(sname_canon, ip_canon, cookie_hash)
   if self.redis then
     -- TODO(hardened): redis GET + verify mac before trusting; error -> nil (deny).
     return nil
   end
-  local json = self.grants:get(grant_key(self, sname_canon, ip_canon))
+  local json
+  if cookie_hash then
+    json = self.grants:get(grant_key(self, sname_canon, ip_canon, cookie_hash))
+  end
+  if not json then
+    json = self.grants:get(grant_key(self, sname_canon, ip_canon))
+  end
   if not json then return nil end
   return cjson.decode(json)   -- nil on corrupt -> treated as no grant (deny)
 end
@@ -95,12 +117,29 @@ end
 -- still removes it. This is what makes the gate testable and recoverable in M1
 -- before the knock protocol (M2) issues registry-backed grants.
 function methods:is_allowed(sname_canon, ip_canon, registry, now, cookie_hash_present)
-  local rec = self:get_grant(sname_canon, ip_canon)
+  local rec = self:get_grant(sname_canon, ip_canon, cookie_hash_present)
   if not rec then return nil end
+  -- The key concatenates fields with ":", and a canonical server_name can itself
+  -- contain ":" (a bracketed IPv6 literal canonicalizes to 2001:db8::1), so the
+  -- key alone is a weak identifier. Confirm the record actually describes this
+  -- request rather than trusting where it was filed.
+  if rec.service ~= sname_canon or rec.ip ~= ip_canon then return nil end
+  -- Check the record's OWN expiry, not just the dict TTL. shdict:set(k,v,0) means
+  -- "never expire", and the BunkerWeb admin API passes ttl straight through
+  -- (0 is truthy in Lua, so `tonumber(body.ttl) or 3600` keeps it), so a grant
+  -- created with ttl=0 lived forever here while Go denied it on `now >= g.Exp`.
+  if type(rec.exp) ~= "number" or now >= rec.exp then return nil end
   if not rec.manual then
     local token = registry and registry:lookup(rec.kid)
     if not token then return nil end               -- kid revoked/unknown -> deny
     if registry:is_expired(token, now) then return nil end
+    -- Re-check the per-service allow-list too, not just registry membership.
+    -- Dropping a kid from one site's allow-list while leaving the token
+    -- registered (it may still serve another site) otherwise left the
+    -- de-authorized device admitted for the whole grant TTL, while deleting the
+    -- token evicted it at once — two admin actions that look equivalent from
+    -- the console behaving differently.
+    if not registry:allowed_for_service(rec.kid, sname_canon) then return nil end
   end
   if rec.binding == "ip+cookie" then
     -- The grant is additionally bound to the browser that knocked: the client
@@ -130,9 +169,26 @@ function _M.record(sname_canon, ip_canon, kid, ttl, opts)
   }
 end
 
+-- Remove EVERY grant for (service, ip): the ip-bound one and any device-bound
+-- ones. An admin revoking an address means "this address loses access", not
+-- "one of the devices there does" — with ip+cookie there may be several, and
+-- leaving the rest behind would be a silent partial revoke.
 function methods:del_grant(sname_canon, ip_canon)
   if self.redis then return nil, "hardened redis backend not implemented" end
   self.grants:delete(grant_key(self, sname_canon, ip_canon))
+  -- Match each record's OWN fields, never a key prefix. Keys join fields with
+  -- ":" and a canonical IPv6 address contains ":", so a prefix scan for
+  -- 2001:db8::1 also deleted the unrelated client 2001:db8::1:2 — a silent
+  -- over-revoke that looked like a correct one.
+  for _, k in ipairs(self.grants:get_keys(0)) do
+    local json = self.grants:get(k)
+    if json then
+      local rec = cjson.decode(json)
+      if rec and rec.service == sname_canon and rec.ip == ip_canon then
+        self.grants:delete(k)
+      end
+    end
+  end
   return true
 end
 
@@ -185,12 +241,38 @@ function methods:enroll_code_put(code, data, ttl)
   return true
 end
 
--- Consume a code (single-use): returns its data table, or nil. Delete-after-read.
+-- Consume a code (single-use): returns its data table, or nil.
+--
+-- PROTOCOL §2.1 requires the code be marked consumed ATOMICALLY. A read then
+-- delete is not: two requests racing across workers both `get` before either
+-- `delete`, so both receive the secret and two devices end up sharing one
+-- long-term key — which breaks "one token = one device" and makes regenerating
+-- the token useless as a revocation.
+--
+-- `add` on a shared dict IS atomic across workers, so the winner of a claim
+-- marker is the single consumer. Same primitive as nonce_claim below; the marker
+-- outlives the code so a late loser cannot re-consume a re-issued one.
+local CLAIM_PREFIX = "jit:ecx:"
+
+-- Read a code WITHOUT consuming it, so a caller can reject one it cannot serve
+-- (unknown kid) before burning it. Mirrors EnrollStore.Peek in core/go; without
+-- it the Lua engines destroyed a perfectly good enrollment code on any hostile
+-- POST naming a kid this instance does not have.
+function methods:enroll_code_peek(code)
+  if self.redis then return nil end
+  local json = self.nonces:get(ENROLL_PREFIX .. code)
+  if not json then return nil end
+  return cjson.decode(json)
+end
+
 function methods:enroll_code_consume(code)
   if self.redis then return nil end
   local key = ENROLL_PREFIX .. code
   local json = self.nonces:get(key)
   if not json then return nil end
+  -- Exactly one caller can win this; everyone else sees "exists" and gets nil.
+  local won = self.nonces:add(CLAIM_PREFIX .. code, true, 900)
+  if won ~= true then return nil end
   self.nonces:delete(key)
   return cjson.decode(json)
 end

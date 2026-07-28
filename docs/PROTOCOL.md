@@ -37,16 +37,38 @@ Content-Type: application/json
 { "v": 1, "code": "<one-time-code>" }
 ```
 
-Response on success (`200`):
+Response on success (`204 No Content`), with the result in headers:
 ```
-{ "v": 1, "kid": "<opaque kid>", "secret": "<base64url 32 bytes>",
-  "alg": "HMAC-SHA256", "policy": { "origins": ["grafana.example.com"] } }
+204 No Content
+X-JIT-Kid:     <opaque kid>
+X-JIT-Secret:  <base64url 32 bytes>
+X-JIT-Alg:     HMAC-SHA256      (OPTIONAL; see note)
+X-JIT-Origins: grafana.example.com[,another.example.com]
+Cache-Control: no-store
 ```
 
+> **`X-JIT-Alg` is optional.** Only the Lua engines send it; the Go engines do
+> not, and the client does not read it — the algorithm is pinned per `kid` by
+> the verifier's registry (§8), which is where the authority belongs. A client
+> **MUST NOT** select an algorithm from this header.
+>
+> **Header form, not a JSON body.** Earlier revisions of this document specified
+> `200` with a JSON body; no implementation ever did that, and the client reads
+> the headers — so the document was the wrong artifact. It is corrected here
+> rather than changing five verifiers and every enrolled device.
+>
+> One consequence is worth stating plainly: a response **header** carrying a
+> long-term secret is more likely to be captured by proxy access logging than a
+> body would be. `Cache-Control: no-store` is required, the exchange is
+> single-use and short-TTL, and any intermediary between the client and the
+> verifier is already fully trusted (it terminates the TLS the secret travels
+> under) — but do not add access-log header capture on this path.
+
 Rules:
-- The code **MUST** be single-use and short-TTL. The verifier **MUST** mark it consumed atomically and reject (and SHOULD alert on) any second use.
+- The code **MUST** be single-use and short-TTL. The verifier **MUST** mark it consumed atomically — a read-then-delete is not sufficient, since two concurrent redemptions can both read before either deletes and two devices then share one long-term secret — and reject (and SHOULD alert on) any second use.
+- The verifier **SHOULD** validate the code's `kid` **before** consuming it, so a request that cannot succeed anyway does not burn an otherwise-valid code.
 - The client **MUST** import the secret as a non-extractable key and discard the raw bytes (§7).
-- `policy.origins` is **advisory** — a hint for which origins to knock at. Authority over which `kid` may open which service lives with the verifier, never the client. The client **MUST** confirm origins with the user (per-origin permission) before auto-knocking (SECURITY-REVIEW Ext-7).
+- `X-JIT-Origins` is **advisory** — a hint for which origins to knock at. Authority over which `kid` may open which service lives with the verifier, never the client. The client **MUST** confirm origins with the user (per-origin permission) before auto-knocking (SECURITY-REVIEW Ext-7), and **MUST NOT** let this header widen the set the user approved: a client may accept a narrower list than it asked about, never a broader one, since the enrollment server is not necessarily trusted at the moment the user is shown the consent prompt.
 - Any failure returns the generic error response (§6). The endpoint is served **before** the grant check (an enrolling device is by definition not yet granted) and **MUST** be rate-limited.
 
 > **v3 (asymmetric, future):** the client generates a non-extractable keypair and sends only its public key in the enroll request; the response carries no secret. The wire shape is otherwise identical. Enrollment key-type is pinned per `kid`; a verifier **MUST NOT** accept an HMAC proof for a kid enrolled as asymmetric, or vice versa (no downgrade — SECURITY-REVIEW CR-7).
@@ -76,7 +98,8 @@ Content-Type: application/json
 
 - There is **no** `step`/timestamp field. Freshness comes entirely from the nonce (a client-supplied time field was removed as a malleable input — SECURITY-REVIEW CR-1/CR-5).
 - On success: `204 No Content`, the grant is created (§ verifier writes `(service, ip)` → TTL), and in Hardened `ip+cookie` mode a `Set-Cookie` with an opaque grant-id is added. On failure: the generic error response (§6).
-- The verifier **MUST** parse JSON strictly (reject duplicate keys) and use the exact `kid`/`nonce` bytes for both lookup and MAC input (no "normalize for lookup, MAC the raw" split).
+- The verifier **MUST** use the exact `kid`/`nonce` bytes for both lookup and MAC input — no "normalize for lookup, MAC the raw" split. This is the property that matters, and it is what makes duplicate keys harmless: every implementation decodes once and feeds the SAME decoded value to both, so a last-wins duplicate cannot desynchronize them.
+- Verifiers **SHOULD** reject duplicate keys outright. None currently does — Go's `encoding/json` and Lua's `cjson` are both last-wins — so this is a SHOULD, not the MUST it was previously written as. Do not rely on it.
 
 ---
 
@@ -168,7 +191,7 @@ The marker header (`interstitial` mode only) is the extension's fallback trigger
 The full client design is DESIGN §7; the load-bearing wire-facing rules:
 
 - Auto-knock **only** on top-level, main-frame, user-initiated navigations (`frameId==0`), never on subframes/`window.open`/redirect-only chains (confused-deputy fix, SECURITY-REVIEW C5).
-- The service worker derives `server_name` from the **authenticated tab URL**, fetches its own nonce, and **MUST NOT** return a proof or signature across any message boundary; `externally_connectable` is closed (`{ids:[],matches:[]}`) (signing-oracle fix, C6).
+- The service worker derives `server_name` from the **authenticated tab URL**, fetches its own nonce, and **MUST NOT** return a proof or signature across any message boundary; `externally_connectable` is absent from the manifest entirely, which is the MV3 default and strictly stronger than declaring `{ids:[],matches:[]}` — no web page or other extension can connect (signing-oracle fix, C6).
 - Origin matching is **exact** (scheme+host+port, lowercased, IDNA-normalized) with a public-suffix guard; never substring or implicit-subdomain.
 - All enrolled origins and all knock fetches are **HTTPS-only**; `http://` enrollment is refused.
 - The secret is a non-extractable key; `storage.session` for ephemeral state, `storage.local` for non-secret config, **never** `storage.sync`.

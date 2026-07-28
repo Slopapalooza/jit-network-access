@@ -31,18 +31,53 @@ const f = {
   origins: (p.get("origins") || "").split(",").map((s) => s.trim()).filter(Boolean),
   label: p.get("label") || "",
 };
-if (!f.origins.length && f.server) f.origins = [new URL(f.server).origin];
+// Every field here comes from the query string of a link that ANY website may
+// have served, so nothing is assumed well-formed.
+const serverOrigin = (() => {
+  try { return new URL(f.server).origin; } catch { return null; }
+})();
+if (!f.origins.length && serverOrigin) f.origins = [serverOrigin];
 
-const shown = f.origins.length ? f.origins : (f.server ? [f.server] : []);
+// Display the NORMALIZED origin, which is what enrollToken actually requests
+// permission for and enrols. Showing the raw query-string value meant the
+// consent list and the enrolled set could differ — "https://app.example.com:443"
+// and "https://app.example.com/anything" both normalize to the same origin, and
+// the user was asked about a string that was not the thing being granted.
+// Anything that will not normalize is surfaced as invalid rather than silently
+// dropped or rendered as-is.
+const shownRaw = f.origins.length ? f.origins : (serverOrigin ? [serverOrigin] : []);
+const shown = [];
+let invalid = 0;
+for (const o of shownRaw) {
+  try {
+    const u = new URL(o.includes("://") ? o : "https://" + o);
+    if (u.protocol !== "https:") throw new Error("not https");
+    shown.push(u.origin);
+  } catch {
+    invalid++;
+  }
+}
+f.origins = shown;
 for (const o of shown) {
   const li = document.createElement("li");
   li.appendChild(el("code", null, o));
   $("origins").appendChild(li);
 }
+if (invalid) {
+  const li = document.createElement("li");
+  li.appendChild(el("span", "err", invalid + " entry/entries in this link are not valid https origins and were ignored"));
+  $("origins").appendChild(li);
+}
 
-if (!f.code || !f.server) {
+// Name the server the one-time code will be exchanged with. The service worker
+// only steers the tab here; it does not vouch for the site. Which host is about
+// to hand this browser a device key is the decision the user is actually being
+// asked to make, so it has to be on screen. textContent, never innerHTML.
+$("server").textContent = serverOrigin || "(missing or malformed)";
+
+if (!f.code || !serverOrigin) {
   $("box").textContent = "";
-  $("box").appendChild(el("p", "err", "This registration link is missing a code or server."));
+  $("box").appendChild(el("p", "err", "This registration link is missing a code or a valid server."));
 } else {
   $("enroll").addEventListener("click", async () => {
     $("enroll").disabled = true;

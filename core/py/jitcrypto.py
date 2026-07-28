@@ -57,7 +57,23 @@ def canon_server_name(host: str) -> str:
     return h.lower()
 
 def canon_ip(addr: str, v6_prefix: int = 128, v4_prefix: int = 32) -> str:
+    # Prefix bounds are validated, not silently clamped. Go and this reference
+    # used to treat any prefix >= the address width as "exact host", so a config
+    # typo of 1280 behaved as /128 here while the Lua core rejected it outright —
+    # the same registry admitting a client on one engine and denying it on
+    # another. Fail closed on nonsense config in all three.
+    if not 0 <= v6_prefix <= 128:
+        raise ValueError(f"canon_ip: v6_prefix {v6_prefix} out of range")
+    if not 0 <= v4_prefix <= 32:
+        raise ValueError(f"canon_ip: v4_prefix {v4_prefix} out of range")
     ip = ipaddress.ip_address(addr)
+    # A zone ("fe80::1%eth0") is a link-scope selector, not part of the address.
+    # Go rejects it and Lua cannot parse it; accepting it here let the reference
+    # canonicalize something the verifiers refuse — and for ::ffff:1.2.3.4%eth0
+    # the mapped-collapse below would silently DISCARD the zone, which is exactly
+    # the ambiguity PROTOCOL §4 step 1 says to reject.
+    if getattr(ip, "scope_id", None) is not None:
+        raise ValueError(f"canon_ip {addr!r}: zoned address")
     if ip.version == 6 and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
     if ip.version == 4:

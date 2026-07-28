@@ -24,9 +24,13 @@ app.example.com {
 		# ipv6_prefix  128
 		# rate_limit   10                # knock attempts per minute per IP
 
-		# Only enable behind a correctly configured trusted_proxies — it keys
-		# grants on the resolved client IP instead of the un-forgeable TCP peer.
+		# Only when Caddy is genuinely behind another proxy. Both lines are
+		# needed: trust_forwarded alone is refused at startup, because without
+		# knowing which hops are yours, X-Forwarded-For lets any client pick its
+		# own grant key. The header is walked right-to-left and the first address
+		# that is NOT in trusted_proxies is the client.
 		# trust_forwarded
+		# trusted_proxies 10.0.0.0/8 192.168.0.0/16
 	}
 
 	reverse_proxy localhost:3000

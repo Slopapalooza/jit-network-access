@@ -58,7 +58,8 @@ behind a valid grant. No `order` global option is needed.
 | `binding` | `ip` | or `ip+cookie` (also requires the device's grant cookie) |
 | `ipv6_prefix` | `128` | `64` admits a whole /64 segment |
 | `rate_limit` | `10` | knock attempts per minute per IP |
-| `trust_forwarded` | off | key grants on Caddy's resolved client IP instead of the TCP peer |
+| `trust_forwarded` | off | derive the client IP from `X-Forwarded-For` instead of the TCP peer; requires `trusted_proxies` |
+| `trusted_proxies` | — | CIDRs/addresses your own proxies occupy; mandatory with `trust_forwarded` |
 
 ### `binding ip+cookie`
 
@@ -69,12 +70,35 @@ CGNAT, VPN) a co-located client that merely shares the IP does not inherit
 access. `SameSite=Strict` is required, not incidental: `Lax` would let a
 cross-site top-level navigation ride the cookie through the gate.
 
-### `trust_forwarded`
+### `trust_forwarded` + `trusted_proxies`
 
 Off by default, and that default is the safe one — grants key on the TCP peer,
-which a request header cannot move. Enable it **only** when Caddy is genuinely
-behind a trusted proxy with its own `trusted_proxies` correctly narrowed;
-otherwise anyone can set `X-Forwarded-For` and nominate their own grant key.
+which a request header cannot move.
+
+If Caddy really is behind another proxy, enable it **together with**
+`trusted_proxies`, listing the CIDRs your own infrastructure occupies:
+
+```
+jit_access {
+	trust_forwarded
+	trusted_proxies 10.0.0.0/8 192.168.0.0/16
+	...
+}
+```
+
+`trust_forwarded` without `trusted_proxies` is rejected at provision time, so a
+half-configured gate fails to start rather than silently letting every client
+choose its own grant key.
+
+The handler keeps its **own** trusted-proxy list rather than reading Caddy's
+server-level `trusted_proxies`. That is deliberate: Caddy's
+`http.request.client_ip` resolves to the *left-most* `X-Forwarded-For` entry —
+the one the client wrote — unless the operator also sets
+`trusted_proxies_strict`. Depending on a separate directive that most
+deployments never set would make the gate's safety silently conditional. With
+its own list the handler always walks the header from the right and takes the
+first address that is not one of your proxies, so a client-appended entry can
+never win.
 
 ## Operations
 

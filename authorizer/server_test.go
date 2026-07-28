@@ -500,12 +500,83 @@ func TestRateLimitOnKnockEndpoints(t *testing.T) {
 		w := do(s, req(http.MethodGet, svcA, prefix+"/challenge", proxyIP, nil, nil))
 		codes[w.Code]++
 	}
-	if codes[http.StatusTooManyRequests] == 0 {
-		t.Error("rate limit never triggered")
-	}
 	if codes[http.StatusNoContent] > 3 {
 		t.Errorf("allowed %d challenges, limit was 3", codes[http.StatusNoContent])
 	}
+	if codes[http.StatusNoContent] == 6 {
+		t.Error("rate limit never triggered")
+	}
+	// A throttled request is answered like every other rejection, never with a
+	// distinctive 429 — see the no-oracle test below.
+	if codes[http.StatusTooManyRequests] != 0 {
+		t.Errorf("throttling leaked a distinguishable 429 (%d of them)", codes[http.StatusTooManyRequests])
+	}
+}
+
+// PROTOCOL §2.1: /enroll MUST be rate-limited. It trades a one-time code for a
+// long-term device secret, so it is the highest-value endpoint in the protocol,
+// and it was the only knock endpoint with no throttle at all.
+func TestRateLimitOnEnroll(t *testing.T) {
+	s := testServer(t, func(c *Config) { c.RateLimit = 3 })
+	prefix := s.config().URIPrefix
+	granted := 0
+	for i := 0; i < 25; i++ {
+		w := do(s, req(http.MethodPost, svcA, prefix+"/enroll", proxyIP,
+			map[string]string{"Content-Type": "application/json"}, []byte(`{"code":"guess"}`)))
+		if w.Code != http.StatusForbidden && w.Code != http.StatusNotFound {
+			granted++
+		}
+	}
+	if granted != 0 {
+		t.Errorf("%d enroll attempts were not rejected", granted)
+	}
+	// The limiter is shared with the other knock endpoints, so a burst against
+	// /enroll must consume the same budget rather than running unmetered.
+	if s.rl.allow("203.0.113.5", 3, s.now()) == false {
+		t.Log("(different IP unaffected, as expected)")
+	}
+	ip := mustClientIP(t, s, proxyIP)
+	if s.rl.allow(ip, 3, s.now()) {
+		t.Error("/enroll attempts did not consume the rate-limit budget for that IP")
+	}
+}
+
+// Stealth mode must not be discoverable by probing: a throttled protocol
+// endpoint has to look exactly like any other path. Before this, the protocol
+// paths answered 429 while everything else answered 404, so a few requests
+// located the gate.
+func TestStealthModeGivesNoEndpointOracle(t *testing.T) {
+	s := testServer(t, func(c *Config) {
+		c.RateLimit = 2
+		c.Services[svcA] = ServiceConfig{Tokens: []string{testKid}, FailureMode: FailStealth}
+	})
+	prefix := s.config().URIPrefix
+
+	var protocolCodes []int
+	for i := 0; i < 5; i++ {
+		protocolCodes = append(protocolCodes, do(s, req(http.MethodGet, svcA, prefix+"/challenge", proxyIP, nil, nil)).Code)
+	}
+	unknown := do(s, req(http.MethodGet, svcA, prefix+"/nope", proxyIP, nil, nil)).Code
+
+	for i, c := range protocolCodes {
+		if c == http.StatusNoContent {
+			continue // a successful challenge is allowed to differ
+		}
+		if c != unknown {
+			t.Errorf("stealth oracle: rejected challenge #%d answered %d but an unknown path answered %d",
+				i, c, unknown)
+		}
+	}
+}
+
+func mustClientIP(t *testing.T, s *Server, remoteAddr string) string {
+	t.Helper()
+	r := req(http.MethodGet, svcA, "/", remoteAddr, nil, nil)
+	ip, _, err := s.config().ClientIP(r)
+	if err != nil {
+		t.Fatalf("client ip: %v", err)
+	}
+	return ip
 }
 
 // ingress-nginx sends its auth subrequest with Host set to the AUTH service's
@@ -538,5 +609,239 @@ func TestIngressNginxOriginalURL(t *testing.T) {
 	}, nil)
 	if w := do(s, r2); w.Code != http.StatusNoContent {
 		t.Errorf("protocol endpoint via X-Original-URL: got %d want 204", w.Code)
+	}
+}
+
+// admin_listen was parsed, documented as isolating the admin API on its own
+// listener, and then never read — so an operator who set it silently kept
+// /admin/* on the main port alongside the protocol endpoints.
+func TestAdminListenMovesAdminOffTheMainListener(t *testing.T) {
+	// default: no admin_listen -> /admin is on the main handler
+	s := testServer(t, nil)
+	w := do(s, req(http.MethodGet, svcA, "/admin/metrics", proxyIP,
+		map[string]string{"Authorization": "Bearer admin-secret"}, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("default: /admin/metrics on the main listener: got %d want 200", w.Code)
+	}
+
+	// configured: /admin must be GONE from the main handler...
+	s2 := testServer(t, func(c *Config) { c.AdminListen = "127.0.0.1:9999" })
+	w2 := do(s2, req(http.MethodGet, svcA, "/admin/metrics", proxyIP,
+		map[string]string{"Authorization": "Bearer admin-secret"}, nil))
+	if w2.Code == http.StatusOK {
+		t.Error("admin_listen set but /admin/metrics still served on the main listener")
+	}
+
+	// ...and present on the admin handler.
+	ah := s2.AdminHandler()
+	if ah == nil {
+		t.Fatal("admin_listen set but AdminHandler() returned nil")
+	}
+	rec := httptest.NewRecorder()
+	ar := req(http.MethodGet, svcA, "/admin/metrics", proxyIP,
+		map[string]string{"Authorization": "Bearer admin-secret"}, nil)
+	ah.ServeHTTP(rec, ar)
+	if rec.Code != http.StatusOK {
+		t.Errorf("admin handler: got %d want 200", rec.Code)
+	}
+
+	// The admin listener still refuses untrusted peers and bad tokens.
+	rec2 := httptest.NewRecorder()
+	ah.ServeHTTP(rec2, req(http.MethodGet, svcA, "/admin/metrics", directIP,
+		map[string]string{"Authorization": "Bearer admin-secret"}, nil))
+	if rec2.Code == http.StatusOK {
+		t.Error("SECURITY: admin listener served an untrusted peer")
+	}
+	rec3 := httptest.NewRecorder()
+	ah.ServeHTTP(rec3, req(http.MethodGet, svcA, "/admin/metrics", proxyIP,
+		map[string]string{"Authorization": "Bearer wrong"}, nil))
+	if rec3.Code == http.StatusOK {
+		t.Error("SECURITY: admin listener accepted a wrong token")
+	}
+}
+
+// A SIGHUP that changes uri_prefix must actually move the endpoints. The routing
+// table used to be captured once at startup, so the mux kept serving the OLD
+// prefix while /authz carved out the NEW one — nobody could knock, and the
+// service locked itself out until a restart.
+func TestReloadRebuildsRoutingTable(t *testing.T) {
+	s := testServer(t, nil)
+	h := s.Handler() // built once, as main.go does
+
+	serve := func(path string) int {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req(http.MethodGet, svcA, path, proxyIP, nil, nil))
+		return w.Code
+	}
+	if serve("/.well-known/jit-access/challenge") != http.StatusNoContent {
+		t.Fatal("precondition: default prefix should serve a challenge")
+	}
+
+	cfg2 := DefaultConfig()
+	cfg2.AdminToken = "admin-secret"
+	cfg2.URIPrefix = "/.well-known/jit2"
+	cfg2.Tokens = []TokenConfig{{Kid: testKid, Secret: testSecret}}
+	cfg2.Services = map[string]ServiceConfig{svcA: {Tokens: []string{testKid}}}
+	if err := cfg2.finalize(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reload(cfg2); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	if got := serve("/.well-known/jit2/challenge"); got != http.StatusNoContent {
+		t.Errorf("new prefix after reload: got %d want 204 (stale mux)", got)
+	}
+	if got := serve("/.well-known/jit-access/challenge"); got == http.StatusNoContent {
+		t.Error("old prefix still served a challenge after reload")
+	}
+}
+
+// listen/admin_listen cannot be applied without rebinding sockets, so a reload
+// that changes them must be refused rather than silently half-applied.
+func TestReloadRefusesListenChange(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		mutol func(*Config)
+	}{
+		{"listen", func(c *Config) { c.Listen = "127.0.0.1:9" }},
+		{"admin_listen", func(c *Config) { c.AdminListen = "127.0.0.1:9" }},
+	} {
+		s := testServer(t, nil)
+		cfg2 := DefaultConfig()
+		cfg2.AdminToken = "admin-secret"
+		cfg2.Tokens = []TokenConfig{{Kid: testKid, Secret: testSecret}}
+		cfg2.Services = map[string]ServiceConfig{svcA: {Tokens: []string{testKid}}}
+		tc.mutol(cfg2)
+		if err := cfg2.finalize(); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Reload(cfg2); err == nil {
+			t.Errorf("%s change: reload should be refused, not half-applied", tc.name)
+		}
+	}
+}
+
+// Stealth mode must be indistinguishable from an unrouted path, including on the
+// method-not-allowed and rate-limited paths, and in the BODY not just the status.
+func TestStealthIsByteIdenticalToPlatform404(t *testing.T) {
+	s := testServer(t, func(c *Config) {
+		c.RateLimit = 1
+		c.Services[svcA] = ServiceConfig{Tokens: []string{testKid}, FailureMode: FailStealth}
+	})
+	prefix := s.config().URIPrefix
+
+	shape := func(w *httptest.ResponseRecorder) string {
+		return w.Result().Status + "|" + w.Header().Get("Content-Type") +
+			"|" + w.Header().Get("Cache-Control") + "|" + w.Body.String()
+	}
+	unrouted := shape(do(s, req(http.MethodGet, svcA, "/definitely-not-a-route", proxyIP, nil, nil)))
+
+	cases := map[string]*httptest.ResponseRecorder{
+		"wrong method on challenge": do(s, req(http.MethodPost, svcA, prefix+"/challenge", proxyIP, nil, nil)),
+		"unknown path under prefix": do(s, req(http.MethodGet, svcA, prefix+"/nope", proxyIP, nil, nil)),
+	}
+	// exhaust the limiter, then a throttled challenge
+	for i := 0; i < 4; i++ {
+		do(s, req(http.MethodGet, svcA, prefix+"/challenge", proxyIP, nil, nil))
+	}
+	cases["rate-limited challenge"] = do(s, req(http.MethodGet, svcA, prefix+"/challenge", proxyIP, nil, nil))
+
+	for name, w := range cases {
+		if got := shape(w); got != unrouted {
+			t.Errorf("%s is distinguishable from an unrouted path:\n  got      %q\n  unrouted %q", name, got, unrouted)
+		}
+	}
+}
+
+// Two json keys that canonicalize alike used to collapse into one map slot, and
+// which allow-list / failure_mode survived was decided by Go's randomized map
+// iteration — so the effective policy changed from one process start to the next.
+func TestCollidingServiceNamesRejected(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Tokens = []TokenConfig{{Kid: testKid, Secret: testSecret}}
+	cfg.Services = map[string]ServiceConfig{
+		"app.example.com":      {Tokens: []string{testKid}, FailureMode: FailStealth},
+		"app.example.com:8443": {Tokens: []string{"*"}, FailureMode: FailInterstitial},
+	}
+	if err := cfg.finalize(); err == nil {
+		t.Fatal("two services canonicalizing to one name must be refused, not resolved by map order")
+	}
+	// a trailing dot is the same collision
+	cfg2 := DefaultConfig()
+	cfg2.Tokens = []TokenConfig{{Kid: testKid, Secret: testSecret}}
+	cfg2.Services = map[string]ServiceConfig{
+		"app.example.com":  {Tokens: []string{testKid}},
+		"App.Example.com.": {Tokens: []string{"*"}},
+	}
+	if err := cfg2.finalize(); err == nil {
+		t.Error("case/trailing-dot collision must be refused too")
+	}
+}
+
+// Policy lookup must be deterministic across repeated construction.
+func TestServiceLookupIsDeterministic(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		s := testServer(t, func(c *Config) {
+			c.Services[svcA] = ServiceConfig{Tokens: []string{testKid}, FailureMode: FailStealth}
+		})
+		svc, ok := s.config().Service(svcA)
+		if !ok || svc.FailureMode != FailStealth {
+			t.Fatalf("iteration %d: got %+v ok=%v, want stealth", i, svc, ok)
+		}
+		if !s.registry().AllowedForService(testKid, svcA) {
+			t.Fatalf("iteration %d: configured kid not allowed", i)
+		}
+		if s.registry().AllowedForService("kid_never_listed", svcA) {
+			t.Fatalf("iteration %d: unlisted kid was allowed", i)
+		}
+	}
+}
+
+// A registration link is only ever SERVED to a browser without the extension —
+// an installed extension intercepts the navigation client-side. So this page is
+// the one chance to tell that user how to install it.
+func TestRegisterLandingPage(t *testing.T) {
+	s := testServer(t, nil)
+	prefix := s.config().URIPrefix
+
+	w := do(s, req(http.MethodGet, svcA, prefix+"/register?code=abc123", proxyIP, nil, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("register page: got %d want 200", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, ExtensionReleasesURL) {
+		t.Error("register page must link to the releases page")
+	}
+	if w.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Error("the URL carries a single-use code; referrer must be suppressed")
+	}
+	if w.Header().Get("Cache-Control") != "no-store" {
+		t.Error("register page must not be cached")
+	}
+	// The code is a single-use credential: it must not be reflected into the DOM.
+	if strings.Contains(body, "abc123") {
+		t.Error("SECURITY: the enrollment code was echoed into the page")
+	}
+
+	// No oracle: a bogus, absent or expired code must produce the SAME page.
+	for _, q := range []string{"", "?code=", "?code=definitely-not-a-real-code", "?code=abc123&x=<script>"} {
+		w2 := do(s, req(http.MethodGet, svcA, prefix+"/register"+q, proxyIP, nil, nil))
+		if w2.Code != http.StatusOK || w2.Body.String() != body {
+			t.Errorf("register page differs for %q — that is an enrollment-code oracle", q)
+		}
+	}
+}
+
+// /authz must let the registration link through while the service is dark, or
+// nobody could reach the install instructions on a gated host.
+func TestRegisterReachableWhileDark(t *testing.T) {
+	s := testServer(t, nil)
+	uri := s.config().URIPrefix + "/register?code=abc"
+	w := do(s, req(http.MethodGet, "x", "/authz", proxyIP, map[string]string{
+		"X-Forwarded-Host": svcA, "X-Forwarded-Uri": uri,
+	}, nil))
+	if w.Code != http.StatusNoContent {
+		t.Errorf("authz for the register link: got %d want 204", w.Code)
 	}
 }

@@ -46,6 +46,15 @@ $KUBECTL wait --namespace ingress-nginx \
   --timeout=300s
 
 echo "==> deploying the Authorizer, the protected service and both Ingresses"
+
+# The gated Ingress carries an auth-snippet. ingress-nginx has shipped
+# allow-snippet-annotations=false by default since v1.9.0, and 1.12+ additionally
+# gates snippets behind --annotations-risk-level=Critical, so without this the
+# annotation is either rejected by the admission webhook or silently ignored and
+# the lab exercises a configuration production does not use.
+${SUDO:-sudo} kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge   -p '{"data":{"allow-snippet-annotations":"true"}}' >/dev/null 2>&1 || true
+${SUDO:-sudo} kubectl -n ingress-nginx rollout restart deploy/ingress-nginx-controller >/dev/null 2>&1 || true
+${SUDO:-sudo} kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s >/dev/null 2>&1 || true
 $KUBECTL apply -f "$here/lab-manifests.yaml"
 $KUBECTL -n jit-system rollout status deploy/jit-authorizer --timeout=180s
 $KUBECTL -n default    rollout status deploy/upstream       --timeout=180s

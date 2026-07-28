@@ -90,7 +90,8 @@ labels:
 | `binding` | `ip` | or `ip+cookie` (device-bound; see below) |
 | `ipv6Prefix` | `128` | `64` admits a whole /64 |
 | `rateLimit` | `10` | knock attempts per minute per IP |
-| `trustForwarded` | `false` | key grants on `X-Forwarded-For` instead of the TCP peer |
+| `trustForwarded` | `false` | derive the client IP from `X-Forwarded-For` instead of the TCP peer; requires `trustedProxies` |
+| `trustedProxies` | — | CIDRs/addresses your own proxies occupy; mandatory with `trustForwarded` |
 
 `New()` refuses to start with no tokens, no allow-list, a short/invalid secret,
 or an unknown `binding`/`failureMode` — a misconfigured gate fails loudly at
@@ -103,12 +104,33 @@ A successful knock also sets an opaque, host-only `__Host-jit-grant` cookie
 is then honored only for the browser that knocked — the right choice behind
 office NAT, CGNAT or a VPN, where an IP is not one person.
 
-### `trustForwarded`
+### `trustForwarded` + `trustedProxies`
 
 Off by default, and that default is the safe one: grants key on the TCP peer,
-which a request header cannot move. Enable it **only** when the entryPoint's
-`forwardedHeaders.trustedIPs` is correctly narrowed — otherwise anyone can set
-`X-Forwarded-For` and nominate their own grant key.
+which a request header cannot move.
+
+If Traefik really is behind another proxy, enable it **together with**
+`trustedProxies`, listing the CIDRs your own infrastructure occupies:
+
+```yaml
+jitaccess:
+  trustForwarded: true
+  trustedProxies:
+    - 10.0.0.0/8
+    - 192.168.0.0/16
+```
+
+`trustForwarded` without `trustedProxies` is refused at startup, so a
+half-configured gate fails loudly instead of silently letting every client
+choose its own grant key.
+
+`X-Forwarded-For` is walked from the **right**, and the first address that is not
+in `trustedProxies` is the client. This matters more with Traefik than it looks:
+when the peer is in the entryPoint's `forwardedHeaders.trustedIPs`, Traefik
+*preserves* the incoming header and appends the peer — so the left-most entry is
+exactly the part the client wrote. `forwardedHeaders.trustedIPs` alone is
+therefore **not** sufficient to make this switch safe; the plugin needs its own
+list to know which entries to skip.
 
 ## Development
 

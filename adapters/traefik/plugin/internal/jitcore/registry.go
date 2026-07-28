@@ -48,13 +48,35 @@ func (r *Registry) IsExpired(t *Token, now int64) bool {
 	return t != nil && t.Expires != 0 && now >= t.Expires
 }
 
+// allowKey resolves which key holds the allow-list for a service.
+//
+// Two registry shapes exist. A MULTI-SERVICE registry (the Authorizer, the
+// BunkerWeb plugin, OpenResty) keys allow-lists by canonical server name. A
+// SITE-SCOPED registry (Caddy, Traefik) is built fresh per site block / router,
+// which does not know its own hostnames, so it stores one allow-list under "*".
+//
+// Resolving this here rather than at each call site means IsAllowed can re-check
+// the allow-list without the store needing to know which shape it was handed.
+// The len==1 guard keeps the two shapes unambiguous: a multi-service registry
+// only takes the "*" path if the operator configured exactly one service
+// literally named "*", which is a deliberate global wildcard anyway.
+func (r *Registry) allowKey(serviceCanon string) string {
+	if _, ok := r.Services[serviceCanon]; ok {
+		return serviceCanon
+	}
+	if _, ok := r.Services["*"]; ok && len(r.Services) == 1 {
+		return "*"
+	}
+	return serviceCanon
+}
+
 // AllowedForService answers the per-service allow-list for an already-canonical
 // server name.
 func (r *Registry) AllowedForService(kid, serviceCanon string) bool {
 	if r == nil {
 		return false
 	}
-	svc, ok := r.Services[serviceCanon]
+	svc, ok := r.Services[r.allowKey(serviceCanon)]
 	if !ok {
 		return false
 	}

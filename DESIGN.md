@@ -35,7 +35,7 @@ The design has **two profiles**. Everything that keeps the gate *fundamentally s
 
 **Crucially, the security review's mandatory fixes are almost all baseline and require no external service** — they are code/config properties, not infrastructure:
 
-- **Fail-closed** (plugin self-`pcall`, conf-layer default-deny) — always on. A home user's dark service must never fail open.
+- **Fail-closed** (plugin self-`pcall`, plus defensive core loading — see §5.3) — always on. A home user's dark service must never fail open.
 - **Atomic single-use nonce** — achieved locally with a stateless signed nonce + an atomic "spent" set (`dict:add`, which fails if the key already exists), so there is no cross-node race to lose and no nonce store to flood (§6.3). Redis is not needed for correctness here.
 - **Locked-down extension** (top-level-only knocks, closed `externally_connectable`, worker-derived origin, exact-origin matching) — always on; it's in the client.
 - **Canonical PAE proof + normative key canonicalization** — always on; spec correctness.
@@ -230,7 +230,8 @@ The BunkerWeb plugin's build step vendors `core/lua` into the plugin folder (Bun
 | `JIT_ACCESS_FAILURE_MODE` | multisite | `interstitial` | `interstitial` (marker page, best UX) or `stealth` (generic 404, fwknop-style invisibility) |
 | `JIT_ACCESS_URI_PREFIX` | multisite | `/.well-known/jit-access` | Base path for challenge/respond endpoints |
 | `JIT_ACCESS_TOKEN` (`multiple` group) | global | `` | Token registry entries: `kid:base64secret:label[:expiry]` — `JIT_ACCESS_TOKEN_1`, `_2`, … `type: password` |
-| `JIT_ACCESS_TIME_STEP` | global | `30` | TOTP-style step seconds |
+<!-- JIT_ACCESS_TIME_STEP was removed along with the `step` field; freshness
+     comes entirely from the nonce. No such setting exists in plugin.json. -->
 | `JIT_ACCESS_TIME_WINDOW` | global | `1` | ± steps accepted (clock skew) |
 | `JIT_ACCESS_NONCE_TTL` | global | `60` | Challenge nonce validity seconds |
 | `JIT_ACCESS_RATELIMIT` | global | `10r/m` | Knock endpoint rate limit per source IP |
@@ -244,14 +245,16 @@ The BunkerWeb plugin's build step vendors `core/lua` into the plugin folder (Bun
 
 **`set`** — default `ngx.var.is_jit_allowed = "no"` (declared in `confs/server-http/jitaccess.conf`), consult grant cache so downstream conf/ModSecurity can see the flag early (mirrors whitelist's `is_whitelisted` pattern).
 
-**[SEC] Fail-closed wrapper (§11 R1).** BunkerWeb's access chain fails **open** on a plugin error — it `pcall`-wraps `access()`, logs-and-continues on a thrown error, and ends the loop with `return true` (request proceeds upstream). Verified against v1.6.13 source (SECURITY-REVIEW C1). Therefore the *entire* `access()` body is wrapped in the plugin's own `pcall`; on **any** internal error it returns an explicit deny (`{ret=true, status=deny}`), never throws. Independently, `is_jit_allowed` is promoted from a CRS hint to an **actual conf-layer enforcement gate** on protected locations (default `no` → deny) so that a plugin that fails to *load* still fails closed. Harness tests assert "corrupt the registry / delete the plugin file / send malformed `/respond` → must deny, never 200".
+**[SEC] Fail-closed wrapper (§11 R1).** BunkerWeb's access chain fails **open** on a plugin error — it `pcall`-wraps `access()`, logs-and-continues on a thrown error, and ends the loop with `return true` (request proceeds upstream). Verified against v1.6.13 source (SECURITY-REVIEW C1). Therefore the *entire* `access()` body is wrapped in the plugin's own `pcall`; on **any** internal error it returns an explicit deny (`{ret=true, status=deny}`), never throws. Independently, a plugin that fails to *LOAD* is covered by loading the vendored core defensively (`pcall` at module scope) so the plugin stays loadable and denies — see the correction below. Harness tests assert "corrupt the registry / delete the plugin file / send malformed `/respond` → must deny, never 200".
+
+**Correction (implemented).** The conf-layer `is_jit_allowed` default-deny described above CANNOT work: `$is_jit_allowed` is set during the ACCESS phase, while an nginx `if` in a server/location block is evaluated in the preceding REWRITE phase — the test always sees `'no'` and would 403 every request, granted ones included. What ships instead: the vendored core is loaded with `pcall` at module scope, so a missing or corrupt `jitaccess/core/*.lua` leaves the plugin LOADABLE and denying rather than failing to load (BunkerWeb logs a load error and continues the chain). `$is_jit_allowed` remains a CRS/downstream hint only. See `adapters/bunkerweb/jitaccess/confs/server-http/jitaccess.conf`.
 
 **`access`** — the core, in order (all wrapped per above):
 
 1. If `USE_JIT_ACCESS ≠ yes` → `ret(true, "disabled")` (chain continues).
 2. **Protocol endpoints** (URI under `JIT_ACCESS_URI_PREFIX`) — handled *before* the grant check, since knockers are by definition not yet granted:
    - `GET  <prefix>/challenge` → issue a **stateless signed nonce**: `nonce = ts || rand16 || HMAC(server_nonce_key, ts || rand16 || server || ip)` (32-byte rand via `resty.openssl.rand`, **fail closed if `RAND_bytes` errors**). **[SEC §11 R4]** because the nonce is self-authenticating, `/challenge` **writes nothing** — an unauthenticated flood costs only CPU (rate-limited), and there is no nonce store to exhaust or to LRU-evict live grants/bans from (H5 dissolved). `server_nonce_key` is a per-instance ephemeral key (regenerated on reload; a nonce outliving a reload just forces a re-challenge). Single-use is enforced at burn time, not by storing every issued nonce.
-   - `POST <prefix>/respond` → validate (§6.3). Success: write signed grant (§5.4), return `204` (+ `Set-Cookie` in `ip+cookie` mode). Failure: **generic 404 after equalized constant-time work**. **[SEC §11 R1]** knock failures/denies are **excluded from badbehavior accounting** — feeding them in lets a cold-start burst or a hostile `<img src=dark-origin>` ban a legitimate/shared IP for 24 h instance-wide (H6); brute-force detection is a **separate JIT-owned counter scoped to the knock endpoints only**.
+   - `POST <prefix>/respond` → validate (§6.3). Success: write signed grant (§5.4), return `204` (+ `Set-Cookie` in `ip+cookie` mode). Failure: **generic 404 after equalized constant-time work**. **[SEC §11 R1 — NOT IMPLEMENTED]** the intent was to exclude knock denials from badbehavior accounting, because feeding them in lets a cold-start burst or a hostile `<img src=dark-origin>` ban a legitimate/shared IP for 24 h instance-wide (H6). BunkerWeb offers no per-plugin exemption, so denials ARE counted like any other 403. What ships is the JIT-owned per-IP throttle on the knock endpoints plus operator guidance — see 'Denials and badbehavior' in `adapters/bunkerweb/README.md`.
 3. **Grant check** — `store.is_allowed(ip, server_name)`: **[SEC §11]** `ip` is the local peer in Simple mode (trusted real-IP chain only when real-IP is deliberately enabled — R2); the grant's `kid` is re-checked against the current registry + token expiry so a revoked token stops admitting promptly (R3, H3). Simple/local: read the `lua_shared_dict` — a process-private store no external party can write, so no value-signing is needed. Hardened/shared-backend: the grant value's **signature is verified** (an unsigned Redis write by a bare client is rejected — C3), reads use an atomic `EVAL` GET+TTL cached locally ≤30 s (grants only, never nonces), and **any backend error → fail closed (deny)**. In `ip+cookie` mode also verify the opaque grant-id cookie against `cookie_hash`.
 4. **Allowed** → set `ngx.var.is_jit_allowed = "yes"`, `set_metric("counters", "jit_passed", 1)`; return `ret(true, "jit grant valid")` — or with `ngx.OK` when `JIT_ACCESS_SKIP_CHECKS=yes`.
 5. **Not allowed** →
@@ -330,16 +333,15 @@ The nonce is a **stateless self-authenticating token** (§6.3 step 2): it embeds
 POST /.well-known/jit-access/respond
 Content-Type: application/json
 
-{ "v": 1, "kid": "<kid>", "step": <floor(server_ts / TIME_STEP)>,
-  "nonce": "<echoed nonce>",
+{ "v": 1, "kid": "<kid>", "nonce": "<echoed nonce>",
   "proof": "<b64url HMAC-SHA256(secret, PAE(["jitaccess-v1", server_name_canon, kid_bytes, nonce_raw]))>" }
 ```
 
-**[SEC] Canonical proof construction (§11 R6/R4).** The MAC input is **not** raw concatenation — un-framed concatenation of variable-length fields is non-injective and allows a cross-service proof collision (SECURITY-REVIEW H1). Use PASETO/DSSE-style **Pre-Authentication Encoding**: `PAE(parts) = LE64(#parts) ‖ for each p: LE64(len(p)) ‖ p`. `server_name_canon` = lowercase punycode A-label, no port, no trailing dot (one normative form, shared vectors). `nonce_raw` = the 32 decoded bytes. **The client-supplied `step` field is removed** from the wire and the MAC — it carried no information the server didn't already hold and was the malleable field enabling the collision; freshness is enforced server-side from the stored nonce's mint timestamp. Full 32-byte tag, no truncation.
+**[SEC] Canonical proof construction (§11 R6/R4).** The MAC input is **not** raw concatenation — un-framed concatenation of variable-length fields is non-injective and allows a cross-service proof collision (SECURITY-REVIEW H1). Use PASETO/DSSE-style **Pre-Authentication Encoding**: `PAE(parts) = LE64(#parts) ‖ for each p: LE64(len(p)) ‖ p`. `server_name_canon` = lowercase punycode A-label, no port, no trailing dot (one normative form, shared vectors). `nonce_raw` = the 56 decoded bytes (ts(8) ‖ rand(16) ‖ mac(32)). **The client-supplied `step` field is removed** from the wire and the MAC — it carried no information the server didn't already hold and was the malleable field enabling the collision; freshness is enforced server-side from the stored nonce's mint timestamp. Full 32-byte tag, no truncation.
 
 Server verification — **equalized work on every path** so wrong-kid / wrong-service / wrong-proof / expired-nonce are genuinely indistinguishable (the original short-circuit ordering leaked a kid-enumeration timing oracle, H4). Always fetch the nonce, always compute exactly one HMAC (against a fixed dummy key when the kid is unknown), always run the constant-time compare, then branch to the generic 404 only at the end:
 
-1. Rate limit (knock endpoints excluded from badbehavior — §11 R1).
+1. Rate limit (JIT-owned per-IP counter on the knock endpoints; note these denials are NOT excluded from badbehavior — see §5.3).
 2. **Verify the nonce's own HMAC** (`server_nonce_key`) and its `(server_name, ip)` binding and freshness (`now − ts < NONCE_TTL`) — no lookup, self-authenticating; decode proof, gate on `len == 32`.
 3. Look up `kid` → secret (fixed dummy key if absent); check token unexpired and `kid ∈ JIT_ACCESS_TOKENS` (or `*`). No client `step`.
 4. Recompute the proof HMAC over the PAE canonical string; constant-time compare (`CRYPTO_memcmp`, not Lua `==`). Equalized work on every path so unknown-kid ≈ wrong-proof (no timing oracle — H4).
@@ -408,12 +410,12 @@ Full adversarial analysis and findings ledger: maintained internally (not publis
 | Stolen token secret | Per-device tokens → **`revoke-token(kid)` sweeps live grants**; per-access kid/expiry recheck; token expiry; **secrets encrypted at rest under external KEK**; v3 keypair removes server-side secret entirely |
 | Spoofed client IP (grant/nonce key) | Hardened real-IP a **hard prerequisite**; IP from trusted-hop chain only, never a raw client header (§11 R2) |
 | Grant injection via shared Redis | **Signed grant values** verified on read; Redis AUTH+ACL+TLS, tenant-namespaced keys (§11 R3) |
-| Brute force on knock endpoint | **Equalized-work** generic 404 (genuine no-oracle: dummy-key HMAC on unknown kid); knock-only abuse counter **excluded from badbehavior**; per-IP + global nonce budget |
+| Brute force on knock endpoint | **Equalized-work** generic 404 (genuine no-oracle: dummy-key HMAC on unknown kid); knock-only abuse counter (**not** a badbehavior exemption — none exists; see §5.3); per-IP + global nonce budget |
 | Service enumeration | Stealth mode: deny = platform-generic 404, endpoints silent |
 | CGNAT neighbor inherits admission | Full security chain runs behind the grant; **`ip+cookie` default** for high-value services; opaque host-only `SameSite=Strict` cookie; short TTLs |
 | Confused-deputy / signing oracle (browser) | Top-level-only user-initiated knocks; locked `externally_connectable`; worker-derived `server_name`; no proof returned across message boundary (§11 R6) |
 | Compromised extension code | Non-extractable key stops *export* not *use* → runtime protection is the messaging lockdown + short TTLs; v3 keypair limits blast radius |
-| Fail-open under fault/flood | Plugin self-`pcall` + explicit deny; conf-layer `is_jit_allowed` default-deny; fail-closed on every store/Redis error; nonce dict isolated from grants/bans (§11 R1) |
+| Fail-open under fault/flood | Plugin self-`pcall` + explicit deny; defensive core loading so a LOAD failure still denies; fail-closed on every store/Redis error; nonce dict isolated from grants/bans (§11 R1) |
 | Clock skew | Server-authoritative time; **widened window (±2–3) or soft/log-only** (nonce is the real anti-replay); NTP slew + skew alerting (H8) |
 | Cluster consistency | Signed grants in Redis with TTL, ≤30 s cache **for grants only**; nonces never cached |
 | Admin lockout (extension broken/lost) | Manual grant via authenticated internal API / `bwcli`; static whitelist honored ahead of JIT (survives Redis outage); nonce memory isolated so a flood can't evict the emergency grant |
@@ -428,7 +430,7 @@ Ordering note: `jitaccess` must run in the access chain **after** `whitelist` (s
 `PROTOCOL.md` (L1) and `core/SPEC.md` (L3 interfaces incl. the **local-default GrantStore/NonceStore** contract and the canonical key schema) written first, **incorporating the §11 [BASELINE] gate items** — PAE canonical proof (no client `step`); stateless signed nonce + atomic `add`-based single-use; normative `server_name`/`ip` canonicalization; fail-closed contract; local-store semantics. Conformance vectors (`core/testdata/vectors.json`) cover the **key derivation**, not just the proof; `core/lua` skeleton passes them. Everything downstream implements against these. **This milestone is the security gate — do not start M1 until it reflects §11's baseline items.**
 
 **M1 — BunkerWeb plugin core (gate + grants), Simple profile, ~week 1-2**
-Plugin skeleton loads in a docker-compose harness (bunkerweb + scheduler + two dummy upstreams — **no Redis**). `USE_JIT_ACCESS=yes` denies (fail-closed wrapper + conf-layer default-deny); manual grants via `api()` endpoints (`/jitaccess/grant|revoke|revoke-token|grants`) admit for TTL using the local `lua_shared_dict` GrantStore; interstitial + stealth modes. **Exit test:** curl matrix across two services × grant/no-grant; corrupt-registry/deleted-plugin → still denies (never 200). Redis is *not* part of this milestone.
+Plugin skeleton loads in a docker-compose harness (bunkerweb + scheduler + two dummy upstreams — **no Redis**). `USE_JIT_ACCESS=yes` denies (fail-closed wrapper + defensive core loading); manual grants via `api()` endpoints (`/jitaccess/grant|revoke|revoke-token|grants`) admit for TTL using the local `lua_shared_dict` GrantStore; interstitial + stealth modes. **Exit test:** curl matrix across two services × grant/no-grant; corrupt-registry/deleted-plugin → still denies (never 200). Redis is *not* part of this milestone.
 
 **M2 — Challenge/knock protocol, ~week 2-3**
 Nonce mint/burn, registry parsing from settings, HMAC verify, rate limiting, constant-time/uniform-404 behavior — all in `core/lua`, plugin as thin shim. The scripted knock client doubles as the start of `test/conformance/`. **Exit test:** knock client unlocks service A but never B; replayed captures fail; skewed clocks within window pass; conformance suite green.
@@ -475,13 +477,13 @@ Distilled from the internal adversarial security review. Six root causes. **Each
 > **this section is the authoritative index of what those ids mean**, and the
 > `R1`–`R6` requirements below are the fixes they produced.
 
-**R1 — Fail CLOSED everywhere. [BASELINE]** BunkerWeb's access chain fails *open* on a plugin error (verified). Wrap the whole `access()` body in the plugin's own `pcall` → explicit deny on any error; promote `is_jit_allowed` to a conf-layer default-deny gate independent of the Lua; fail closed on any store error; harness tests for corrupt-registry / deleted-plugin / malformed-input → must deny. **[HARDENED]** the network invariant "origin accepts traffic only from its JIT adapter" with default-deny recipe scaffolds (matters most for multi-path/multi-node topologies).
+**R1 — Fail CLOSED everywhere. [BASELINE]** BunkerWeb's access chain fails *open* on a plugin error (verified). Wrap the whole `access()` body in the plugin's own `pcall` → explicit deny on any error; make a plugin LOAD failure deny too (defensive core loading; a conf-layer `if` cannot do this — wrong nginx phase, see §5.3); fail closed on any store error; harness tests for corrupt-registry / deleted-plugin / malformed-input → must deny. **[HARDENED]** the network invariant "origin accepts traffic only from its JIT adapter" with default-deny recipe scaffolds (matters most for multi-path/multi-node topologies).
 
 **R2 — Never trust a client-supplied IP.** **[BASELINE]** the safe default is `USE_REAL_IP=no` — key on the TCP peer, ignore XFF entirely (correct when the edge server faces the internet directly). **[HARDENED]** when deliberately behind a CDN/LB, real-IP is configured with explicit trusted CIDRs (right-most-untrusted XFF), never broad defaults; forged-XFF harness assertion.
 
 **R3 — Grants are fail-dangerous. [BASELINE]** `revoke-token(kid)` sweeps live grants via a reverse index + per-access kid/expiry recheck; IPv6 default `/128`; immediate local delete on revoke. Local store is process-private, so no value-signing is needed. **[HARDENED]** on a shared backend: **sign every grant value** (verified on read) + Redis AUTH/ACL/TLS + tenant-namespaced keys + revoke tombstone for the cache window; opaque host-only `SameSite=Strict` grant-id cookie + `ip+cookie` binding for high-value/shared-egress services.
 
-**R4 — Single-use nonces, done right. [BASELINE]** Stateless signed nonce (no store to flood); atomic single-use claim via `dict:add` (fails if present); dedicated `lua_shared_dict` for the spent-set, isolated from grants/bans; knock endpoints excluded from badbehavior (separate knock-only abuse counter). **[HARDENED]** on a shared backend the claim is `SET NX EX`; backend unavailable → fail closed.
+**R4 — Single-use nonces, done right. [BASELINE]** Stateless signed nonce (no store to flood); atomic single-use claim via `dict:add` (fails if present); dedicated `lua_shared_dict` for the spent-set, isolated from grants/bans; knock endpoints carry their own per-IP counter (a badbehavior exemption was intended but is not possible; see §5.3). **[HARDENED]** on a shared backend the claim is `SET NX EX`; backend unavailable → fail closed.
 
 **R5 — Fix enrollment custody. [BASELINE]** One-time-code exchange (no long-term secret in the QR/transit); per-kid key-type pinning (no downgrade); token-creation audit log; rotation flow. **[HARDENED]** secrets encrypted at rest under an external KEK; **v3 client-keygen** (server stores only public keys — the recommended path to eliminate at-rest secrets).
 

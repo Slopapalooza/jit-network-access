@@ -52,7 +52,16 @@ function _M.init(opts)
     grant_ttl       = tonumber(opts.grant_ttl) or 3600,
     nonce_ttl       = tonumber(opts.nonce_ttl) or 60,
     enroll_ttl      = tonumber(opts.enroll_ttl) or 86400,
-    ipv6_prefix     = tonumber(opts.ipv6_prefix) or 128,
+    -- Clamped: canon_ip rejects an out-of-range prefix, so an unclamped typo
+    -- would deny every IPv6 client site-wide rather than degrade to /128.
+    ipv6_prefix     = (function()
+      local n = tonumber(opts.ipv6_prefix) or 128
+      if n < 0 or n > 128 then
+        ngx.log(ngx.WARN, "jitaccess: ipv6_prefix ", tostring(n), " out of range, using 128")
+        return 128
+      end
+      return n
+    end)(),
     rate_limit      = tonumber(opts.rate_limit) or 10,
     trust_forwarded = opts.trust_forwarded == true,
     services        = {},
@@ -86,7 +95,7 @@ function _M.init(opts)
   if not grants or not nonces then
     error("jitaccess: missing shared dicts — declare 'lua_shared_dict jit_grants 16m;' and 'lua_shared_dict jit_nonces 16m;'")
   end
-  store = cstore.new({ grants = grants, nonces = nonces })
+  store = cstore.new({ grants = grants, nonces = nonces, rl = ngx.shared.jit_rl })
 
   -- Ephemeral, per-process. Nonces live ~60s, so nothing needs to survive a
   -- restart, and no key material touches disk.
@@ -101,10 +110,28 @@ end
 
 -- ---- request helpers -------------------------------------------------------
 
+-- The service name decides the allow-list, binding, grant_ttl and failure_mode,
+-- so it must not be something the client can set.
+--
+-- $host is the request-line host / Host header — client-controlled. $server_name
+-- is the name nginx MATCHED from the config, which no header can move. Prefer
+-- the latter, exactly as the BunkerWeb sibling does.
+--
+-- $host is still consulted when the matched block has no usable server_name
+-- (e.g. `server_name _;`), but only if it names a CONFIGURED service — otherwise
+-- a mismatched Host on a default_server used to fall through to deny(nil), which
+-- renders the INTERSTITIAL regardless of the service's failure_mode, announcing a
+-- gate the operator configured to be invisible.
 local function service_name()
-  local h = ngx.var.host or ngx.var.server_name
+  local sn = ngx.var.server_name
+  if sn and sn ~= "" and sn ~= "_" then
+    return ccanon.canon_server_name(sn)
+  end
+  local h = ngx.var.host
   if not h or h == "" then return nil end
-  return ccanon.canon_server_name(h)
+  local canon = ccanon.canon_server_name(h)
+  if canon and cfg and cfg.services[canon] then return canon end
+  return nil
 end
 
 -- Grants key on the TCP peer by default: a request header cannot move it
@@ -137,20 +164,41 @@ local function cookie_hash()
   return ccrypto.sha256_hex(v)
 end
 
+-- Per-IP fixed-window counter for the knock endpoints.
+--
+-- A rejection returns the SAME generic response as any other failure (PROTOCOL
+-- §6). Answering 429 here was an endpoint-discovery oracle: in stealth mode the
+-- protocol paths replied 429 while every other path replied 404.
 local function rate_ok(ip)
   if not cfg.rate_limit or cfg.rate_limit <= 0 then return true end
-  local n = store.nonces:incr("rl:" .. ip, 1, 0, 60)
-  if not n then return true end
+  local n = store.rl:incr("rl:" .. ip, 1, 0, 60)
+  -- incr fails when the dict is full or errors. Failing OPEN there means an
+  -- attacker who fills the dict also switches the throttle off, so deny instead.
+  if not n then return false end
   return n <= cfg.rate_limit
 end
 
 -- interstitial = 403 + detection marker; stealth = bare 404.
+-- default_failure_mode is what deny() uses when there is no service to consult
+-- (unknown host, uninitialised gate). It defaults to the STRICTER of the modes
+-- configured, so a deployment that asked for stealth anywhere never answers an
+-- unknown host with the branded interstitial + X-JIT-Access marker.
+local function default_failure_mode()
+  if not cfg or not cfg.services then return "interstitial" end
+  for _, svc in pairs(cfg.services) do
+    if svc.failure_mode == "stealth" then return "stealth" end
+  end
+  return "interstitial"
+end
+
 local function deny(svc)
-  local mode = (svc and svc.failure_mode) or "interstitial"
-  ngx.header["Cache-Control"] = "no-store"
+  local mode = (svc and svc.failure_mode) or default_failure_mode()
   if mode == "stealth" then
+    -- No Cache-Control: nginx's own 404 does not carry one, and stealth mode is
+    -- only stealthy if the response is indistinguishable from an unrouted path.
     return ngx.exit(ngx.HTTP_NOT_FOUND)
   end
+  ngx.header["Cache-Control"] = "no-store"
   ngx.header["X-JIT-Access"] = MARKER
   ngx.header["Content-Type"] = "text/html; charset=utf-8"
   ngx.status = ngx.HTTP_FORBIDDEN
@@ -180,7 +228,7 @@ end
 -- ---- protocol endpoints ----------------------------------------------------
 
 local function challenge(sname, ip, svc)
-  if not rate_ok(ip) then return ngx.exit(ngx.HTTP_TOO_MANY_REQUESTS) end
+  if not rate_ok(ip) then return deny(svc) end   -- generic response, never a distinguishable 429
   local rand = ccrypto.random_bytes(16)
   if not rand then return deny(svc) end
   local ts = ngx.time()
@@ -193,7 +241,7 @@ local function challenge(sname, ip, svc)
 end
 
 local function respond(sname, ip, svc)
-  if not rate_ok(ip) then return ngx.exit(ngx.HTTP_TOO_MANY_REQUESTS) end
+  if not rate_ok(ip) then return deny(svc) end   -- generic response, never a distinguishable 429
   local body = read_json_body()
 
   local nonce = type(body.nonce) == "string" and ccrypto.b64u_decode(body.nonce) or nil
@@ -238,9 +286,13 @@ local function respond(sname, ip, svc)
 end
 
 local function enroll(sname, ip, svc)
-  if not rate_ok(ip) then return ngx.exit(ngx.HTTP_TOO_MANY_REQUESTS) end
+  if not rate_ok(ip) then return deny(svc) end   -- generic response, never a distinguishable 429
   local body = read_json_body()
   if type(body.code) ~= "string" or body.code == "" then return deny(svc) end
+  -- Validate BEFORE burning: consume is single-use, so checking the kid
+  -- afterwards let any hostile POST destroy a valid enrollment code.
+  local peek = store:enroll_code_peek(body.code)
+  if not peek or not registry:lookup(peek.kid) then return deny(svc) end
   local rec = store:enroll_code_consume(body.code)          -- single-use
   if not rec then return deny(svc) end
   local token = registry:lookup(rec.kid)
@@ -256,7 +308,15 @@ end
 -- ---- the gate --------------------------------------------------------------
 
 local function _access()
-  if not cfg or not store then return end            -- init() not called: see below
+  -- init() never ran (the init_by_lua_block include is missing, or it errored,
+  -- or this is a different http block). A bare `return` here would fall through
+  -- to the upstream, i.e. every request served UNGATED and silently — the exact
+  -- fail-open SPEC §7.1 forbids. The pcall wrapper below cannot catch this
+  -- because nothing is thrown, so the deny has to be explicit.
+  if not cfg or not store then
+    ngx.log(ngx.ERR, "jitaccess: not initialized (missing init_by_lua_block?) — failing closed")
+    return deny(nil)
+  end
   local sname = service_name()
   local ip = client_ip()
   if not sname or not ip then return deny(nil) end

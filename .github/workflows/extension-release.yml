@@ -1,0 +1,132 @@
+# Build and publish the Chromium extension on a version tag.
+#
+#   git tag ext-v0.2.2 && git push origin ext-v0.2.2
+#
+# The tag drives the release; the manifest drives the artifact. The job refuses
+# to publish if they disagree, because an installed browser decides whether to
+# take an update by reading manifest.version — a tag that says otherwise just
+# misleads whoever reads the release page.
+#
+# SIGNING: the .crx is signed with the repo secret EXT_SIGNING_KEY (the PEM that
+# also defines the extension's ID). Without it the job still publishes the .zip
+# — which is what the Chrome Web Store wants — and says so on the release page.
+# Add it with:
+#
+#   gh secret set EXT_SIGNING_KEY < JIT-Access.pem
+#
+# That key is the extension's identity: anyone holding it can publish an update
+# every installed browser will accept. It must never be committed.
+name: extension-release
+
+on:
+  push:
+    tags: ["ext-v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and validate only; publish nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write # required to create the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Version agreement (tag vs manifest)
+        id: ver
+        run: |
+          MANIFEST_V=$(python3 -c "import json;print(json.load(open('extension/manifest.json'))['version'])")
+          echo "version=$MANIFEST_V" >> "$GITHUB_OUTPUT"
+          echo "manifest version: $MANIFEST_V"
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            TAG_V="${GITHUB_REF_NAME#ext-v}"
+            if [ "$TAG_V" != "$MANIFEST_V" ]; then
+              echo "::error::tag ext-v$TAG_V does not match manifest version $MANIFEST_V"
+              exit 1
+            fi
+          fi
+
+      # Runs unconditionally and decides inside: a step-level `if` cannot read
+      # env set on that same step, and secrets are not addressable in `if` at all.
+      - name: Restore signing key
+        env:
+          EXT_SIGNING_KEY: ${{ secrets.EXT_SIGNING_KEY }}
+        run: |
+          if [ -z "${EXT_SIGNING_KEY:-}" ]; then
+            echo "::warning::EXT_SIGNING_KEY not set - publishing the .zip only, no signed .crx"
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$EXT_SIGNING_KEY" > "$RUNNER_TEMP/signing.pem"
+          echo "JIT_EXT_KEY=$RUNNER_TEMP/signing.pem" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: bash extension/build.sh
+
+      - name: Show artifacts
+        run: ls -l extension/dist && cat extension/dist/SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jit-access-extension-${{ steps.ver.outputs.version }}
+          path: extension/dist/*
+
+      - name: Publish release
+        if: github.ref_type == 'tag' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ steps.ver.outputs.version }}
+        run: |
+          {
+            echo "Chromium extension for [JIT Network Access](https://github.com/${{ github.repository }}) v$V."
+            echo
+            echo "### Install (unpacked, recommended while unlisted)"
+            echo
+            echo "Chrome refuses to install a \`.crx\` dragged in from outside the Web Store, so the"
+            echo "supported route is the unpacked one:"
+            echo
+            echo "1. Download \`jit-access-$V.zip\` below and unzip it."
+            echo "2. Open \`chrome://extensions\`, turn on **Developer mode**."
+            echo "3. **Load unpacked**, and pick the unzipped folder."
+            echo
+            echo "### Install (managed / policy)"
+            echo
+            echo "The \`.crx\` is signed and carries a stable extension ID, so it can be force-installed"
+            echo "via \`ExtensionInstallForcelist\` with a self-hosted update manifest."
+            echo
+            echo "### Verify what you downloaded"
+            echo
+            echo '```'
+            cat extension/dist/SHA256SUMS
+            echo '```'
+            if [ -f extension/dist/jit-access-$V.crx ]; then
+              echo
+              echo "Extension ID: \`$(python3 extension/crx3.py --id "$JIT_EXT_KEY")\`"
+            else
+              echo
+              echo "> Unsigned build: no \`EXT_SIGNING_KEY\` secret was configured, so this release"
+              echo "> carries the \`.zip\` only."
+            fi
+          } > notes.md
+
+          # Idempotent: a release may already exist when it was cut locally, which
+          # is the default path while the signing key deliberately stays off
+          # GitHub. Upload into it rather than failing the run.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists; uploading artifacts"
+            gh release upload "$GITHUB_REF_NAME" extension/dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "Extension v$V" \
+              --notes-file notes.md \
+              extension/dist/*
+          fi

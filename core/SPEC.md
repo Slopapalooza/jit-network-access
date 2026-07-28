@@ -64,7 +64,9 @@ A grant means "this client IP may reach this service until `exp`." Grants invert
 ### 4.1 Key schema
 
 ```
-grant key   = "jit:grant:" || server_name_canon || ":" || ip_canon
+grant key   = "jit:grant:" || server_name_canon || ":" || ip_canon                  # binding "ip"
+            = "jit:grant:" || server_name_canon || ":" || ip_canon || ":" || cookie_hash
+                                                                                   # binding "ip+cookie"
 bykid index = "jit:grantsbykid:" || kid
 spent nonce = "jit:nonce:" || base64url(rand)        # NonceStore, §5
 
@@ -72,6 +74,8 @@ HARDENED (shared backend): all keys are tenant-namespaced -> "jit:{tenant}:grant
 ```
 
 `server_name_canon` and `ip_canon` are the L1 §4 canonical forms — **always applied**, even in Simple mode, so the schema is uniform and a later switch to a shared backend "just works" and matches across engines.
+
+The cookie component is **required** for `ip+cookie`: a two-part key holds exactly one grant per `(service, ip)`, so two enrolled devices sharing one NAT egress address would evict each other on every knock and flap indefinitely — the deployment `ip+cookie` exists to serve. `cookie_hash` is the same lowercase-hex SHA-256 stored in the value (§4.2), so a reader that has the cookie can address the record directly and a device can only ever find **its own** grant. Lookup order on the request path is: cookie-qualified key when a cookie was presented, then the plain key (so an `ip`-bound grant still matches a request that happens to carry a cookie).
 
 ### 4.2 Value
 
@@ -95,7 +99,9 @@ list() -> [grant]                     # admin/API
 ```
 
 Normative:
-- `is_allowed` **MUST** re-check, on every call, that the grant's `kid` is still in the registry and the token's `expires` has not passed — so a `revoke_token` or an expiry evicts within the cache window even if the record's TTL has not elapsed (SECURITY-REVIEW H3). In `ip+cookie` binding it **MUST** also verify the presented cookie against `cookie_hash`.
+- `is_allowed` **MUST** re-check, on every call, that the grant's `kid` is still in the registry, that the token's `expires` has not passed, **and that the kid is still on the service's allow-list** — so a `revoke_token`, an expiry, or a de-authorization evicts within the cache window even if the record's TTL has not elapsed (SECURITY-REVIEW H3). Re-checking the allow-list matters because removing a kid from one service while leaving the token registered (it may still serve another) is a normal admin action; without it, that action silently did nothing until TTL while deleting the token evicted immediately. In `ip+cookie` binding it **MUST** also verify the presented cookie against `cookie_hash`.
+- A registry may be **multi-service** (allow-lists keyed by canonical server name) or **site-scoped** (one allow-list under `"*"`, built per site block or router by an adapter that does not know its own hostnames). The allow-list check **MUST** resolve the key accordingly, so the same store logic serves both shapes.
+- `revoke(service, ip)` **MUST** remove every grant at that address — the `ip`-bound record and all device-bound ones — since an admin revoking an address means the address loses access, not one device at it. A partial revoke is worse than none, because it looks complete.
 - `revoke_token(kid)` **MUST** delete every grant carrying that kid (via the bykid index) and return the count (blast radius for the admin).
 - **Fail closed:** any backend/store error in `is_allowed` **MUST** return `nil` (deny), never "allow on error." (Local backends cannot network-fail; this rule bites for shared backends.)
 - **Local mode:** TTL handles time-expiry; `revoke`/`revoke_token` delete immediately (no propagation window). **HARDENED:** a revoke also writes a short-lived tombstone that the ≤30 s positive cache must honor, so cross-node revocation is prompt.

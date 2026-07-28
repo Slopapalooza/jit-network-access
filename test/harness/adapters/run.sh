@@ -38,6 +38,10 @@ ENGINES=(
 # Include it automatically when that cluster is up.
 if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:8085/" 2>/dev/null; then
   ENGINES+=("Kubernetes (ingress-nginx):8085")
+else
+  # Say so. Silently shrinking the engine list makes a partial run look like a
+  # full one, and "5/5 engines green" is the claim this script exists to support.
+  echo "NOTE: Kubernetes engine NOT tested (nothing answering on :8085 — run kind/setup.sh first)"
 fi
 
 pass=0; fail=0
@@ -104,6 +108,70 @@ for spec in "${ENGINES[@]}"; do
   [ "$knock" = "204" ]  && ok "knock accepted (204)"            || bad "knock accepted" "got ${knock:-$out}"
   [ "$svc"   = "200" ]  && ok "service opens after knock (200)" || bad "service opens after knock" "got ${svc:-none}"
   [ "$replay" != "204" ] && ok "replayed nonce rejected (${replay:-none})" || bad "replayed nonce rejected" "got 204 — replay accepted!"
+done
+
+# ---- security probes, per engine ------------------------------------------
+# PROTOCOL §9 is explicit that a functional pass is NOT sufficient for
+# conformance. This lab used to assert only the five functional properties
+# above, which is how a traversal bypass in the forward-auth adapters survived:
+# it was never exercised here, and the BunkerWeb-only security suite could not
+# reach these engines. These are the engine-agnostic probes that need no
+# instance API.
+echo
+echo "== security probes (all engines) =="
+# These MUST run against a DARK gate. Previously they ran after the functional
+# loop above, which leaves this client holding a grant — so the traversal probe
+# was asking an already-open gate whether it was open, and could not detect the
+# bypass it exists for. Restart the gates to drop every grant first.
+if [ "${1:-}" != "--no-reset" ] && command -v docker >/dev/null 2>&1; then
+  echo "  (restarting gates so probes run against a dark service)"
+  (cd "$here" && ${SUDO:-sudo} docker compose restart caddy nginx traefik openresty authorizer >/dev/null 2>&1)
+  for port in 8081 8082 8083 8084; do
+    for _ in $(seq 1 30); do
+      curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$port/" && break
+      sleep 1
+    done
+  done
+  sleep 2
+fi
+if command -v kubectl >/dev/null 2>&1 && ${SUDO:-sudo} kubectl get ns jit-system >/dev/null 2>&1; then
+  ${SUDO:-sudo} kubectl -n jit-system rollout restart deploy/jit-authorizer >/dev/null 2>&1
+  ${SUDO:-sudo} kubectl -n jit-system rollout status deploy/jit-authorizer --timeout=120s >/dev/null 2>&1
+  sleep 3
+fi
+
+for spec in "${ENGINES[@]}"; do
+  name="${spec%:*}"; port="${spec##*:}"
+  base="http://$HOSTNAME_:$port"
+  resolve="$HOSTNAME_:$port:127.0.0.1"
+
+  # Sanity: the gate must actually be dark, or nothing below proves anything.
+  dark=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 --resolve "$resolve" "$base/" 2>/dev/null)
+  if [ "$dark" = "200" ]; then
+    bad "$name: probes need a dark gate" "still open (HTTP 200) — probes below are meaningless"
+    continue
+  fi
+
+  # 1. Protocol-prefix traversal must not reach the upstream. The prefix is the
+  #    one path answered WITHOUT a grant, so if the gate's view of the path can
+  #    differ from the proxy's, that carve-out opens every path. Payloads must
+  #    normalize onto something the upstream actually serves.
+  trav_bad=""
+  for t in "/.well-known/jit-access/../../"            "/.well-known/jit-access/../../index.html"            "/.well-known/jit-access/..%2f..%2f"            "/.well-known/jit-access/%2e%2e/%2e%2e/"; do
+    c=$(curl -s -o /dev/null -w "%{http_code}" --path-as-is --max-time 10           --resolve "$resolve" "$base$t" 2>/dev/null)
+    [ "$c" = "200" ] && trav_bad="$trav_bad $t->$c"
+  done
+  if [ -z "$trav_bad" ]; then ok "$name: traversal never reaches upstream"
+  else bad "$name: traversal reached upstream" "$trav_bad"; fi
+
+  # 2. A malformed /respond must deny deliberately, never 5xx and never open.
+  mal_bad=""
+  for b in '' 'not json' '{}' '{"v":1,"kid":"x","nonce":"@@@","proof":"@@@"}'; do
+    c=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 --resolve "$resolve"           -X POST -H "Content-Type: application/json" --data "$b"           "$base/.well-known/jit-access/respond" 2>/dev/null)
+    case "$c" in 403|404) ;; *) mal_bad="$mal_bad [$c]";; esac
+  done
+  if [ -z "$mal_bad" ]; then ok "$name: malformed /respond denies deliberately"
+  else bad "$name: malformed /respond" "non-deny codes:$mal_bad"; fi
 done
 
 echo

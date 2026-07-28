@@ -45,7 +45,11 @@ Visit `https://app-a.local:8443` — it should open after a silent knock.
 - Auto-knock only on **top-level, main-frame** navigations (`frameId === 0`), never subframes / `window.open` — a hidden `<iframe>` on a hostile page cannot make the extension knock (confused-deputy fix).
 - **No external messaging surface:** the manifest omits `externally_connectable` (web pages can't connect) and the worker registers **zero** `onMessageExternal`/`onConnectExternal` listeners, so a co-installed extension has nothing to invoke. Internal messages are `sender`-validated, the worker derives the origin from the **authenticated tab URL** (never the message), and a **proof is never returned across a message boundary** (signing-oracle fix). *Do not add any `*External` listener.*
 - **Exact-origin** matching (scheme+host+port); **HTTPS-only**.
-- Per-tab attempt cap + single-flight + backoff (no knock/reload storms).
+- Per-tab attempt cap + single-flight (no knock/reload storms). The cap is what
+  bounds retries — there is no time-based backoff.
+- A tab opened by another page (`window.open`, `target=_blank`) does not
+  auto-knock at its first destination, so a hostile page cannot make the browser
+  create a grant the user never asked for.
 - The `webRequest` recovery listener is registered **only for origins you've granted** (never `https://*/*`) and re-registered when you enroll/remove a token — so the extension never asks for all-sites access.
 - Secret is a **non-extractable** key in IndexedDB; config in `storage.local`; grant cache in `storage.session`; **never** `storage.sync`.
 
@@ -65,3 +69,65 @@ needs no host permission to *observe* a navigation); the worker then redirects t
 tab to the extension's own `enroll.html`, because MV3 requires a **user gesture**
 to call `chrome.permissions.request` — so the grant + code exchange happen on the
 confirm page's button click, not silently.
+
+## Building a release bundle
+
+```bash
+cd extension && ./build.sh
+```
+
+Produces in `extension/dist/` (git-ignored — release artifacts are attached to a
+GitHub release, not committed):
+
+| Artifact | For |
+|---|---|
+| `jit-access-<version>.zip` | Chrome Web Store upload, and the **Load unpacked** route |
+| `jit-access-<version>.crx` | signed; managed/policy force-install |
+| `SHA256SUMS` | verify what you downloaded |
+
+`build.sh` validates before it packs — manifest shape, that every file the
+manifest references exists, that `externally_connectable` is still absent and the
+CSP still pins `script-src 'self'`, and that the crypto still reproduces the
+shared vectors. A bundle that installs and then silently fails to knock is worse
+than no bundle.
+
+Packing is done by `crx3.py`, which builds the CRX3 container directly and needs
+only `openssl` — no browser, so the same command works locally and in CI. It
+verifies its own output before declaring success (`crx3.py --verify <file>`).
+
+### Signing
+
+The `.crx` is signed with a PEM that is **not in this repo and must never be**:
+that key *is* the extension's identity, and anyone holding it can publish an
+update every installed browser will accept. Point `JIT_EXT_KEY` at it, or omit it
+and get the `.zip` only:
+
+```bash
+JIT_EXT_KEY=/path/to/JIT-Access.pem ./build.sh
+```
+
+Reusing the same key keeps the extension ID stable across releases, which is what
+lets an installed browser take an update and what a force-install policy pins to.
+Print it with `python3 crx3.py --id /path/to/key.pem`.
+
+### Publishing
+
+Tag and push; `.github/workflows/extension-release.yml` builds and creates the
+release. The job refuses to publish when the tag and `manifest.version` disagree.
+
+```bash
+git tag ext-v$(python3 -c "import json;print(json.load(open('extension/manifest.json'))['version'])")
+git push origin --tags
+```
+
+CI signs with the `EXT_SIGNING_KEY` repo secret (`gh secret set EXT_SIGNING_KEY <
+JIT-Access.pem`); without it the release carries the `.zip` alone and says so.
+
+### Users who do not have it yet
+
+A registration link points at `<host>/.well-known/jit-access/register?code=...`.
+With the extension installed, the service worker intercepts that navigation
+before it leaves the browser. Without it, the request reaches the server — which
+serves an install page pointing at the releases above. So the person who most
+needs the download link is exactly the one who gets it, and an enrolled user
+never sees the page.

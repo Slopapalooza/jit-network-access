@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"path"
 	"strings"
 
 	jitcore "github.com/Slopapalooza/jit-network-access/core/go"
@@ -123,60 +124,154 @@ func forwardedList(r *http.Request, header string) []string {
 	return out
 }
 
-// ServiceName returns the canonical service the request is for. Behind a trusted
-// proxy the forwarded host wins (the Host header on a forward-auth subrequest is
-// the Authorizer's own address, not the origin); otherwise only Host is trusted.
+// A forward-auth subrequest describes the ORIGINAL request using one of several
+// conventions, and which one is authoritative is a property of the proxy, not of
+// this code:
 //
-// ingress-nginx is the reason X-Original-URL is consulted: its auth subrequest
-// sets Host to the *auth service's* address and carries the real origin only
-// inside X-Original-URL ($scheme://$http_host$request_uri). Without this, every
-// Kubernetes deployment resolves the service name to the Authorizer's own
-// address, matches no configured service, and denies everything.
-func (c *Config) ServiceName(r *http.Request) string {
-	if peer, err := peerAddr(r); err == nil && c.isTrusted(peer) {
-		for _, h := range []string{"X-Forwarded-Host", "X-Original-Host"} {
-			if v := r.Header.Get(h); v != "" {
-				// a comma-joined chain: the first entry is the original host
-				if i := strings.Index(v, ","); i != -1 {
-					v = v[:i]
-				}
-				return jitcore.CanonServerName(strings.TrimSpace(v))
-			}
-		}
-		if h := originalURLHost(r); h != "" {
-			return jitcore.CanonServerName(h)
-		}
-	}
-	return jitcore.CanonServerName(r.Host)
+//	forwarded     X-Forwarded-Host  + X-Forwarded-Uri    (nginx auth_request, Traefik)
+//	original-url  X-Original-URL                          (ingress-nginx; absolute URL)
+//	original      X-Original-Host   + X-Original-Uri      (some Envoy/ext_authz setups)
+//
+// Picking a fixed global precedence CANNOT be made safe, and trying twice proved
+// it: preferring X-Forwarded-Host let a Kubernetes client name its own service
+// (ingress-nginx does not set that header but does forward the client's), while
+// preferring X-Original-URL let a plain-nginx client do the same (that recipe
+// sets X-Forwarded-Host authoritatively but never blanks X-Original-URL). Each
+// ordering is safe on one deployment and exploitable on the other.
+//
+// So we do not order them. Every convention present is read, and if two of them
+// DISAGREE the request is refused. The proxy sets exactly one authoritatively, so
+// a client that appends another creates a disagreement and gets denied — without
+// this code having to know which proxy it is behind. Blanking the unused headers
+// at the proxy (the shipped recipes do) remains good practice, but is no longer
+// what stands between a client and someone else's grant.
+type forwardedView struct {
+	name string
+	host string // "" when this convention supplied none
+	uri  string // "" when this convention supplied none
 }
 
-// originalURLHost pulls the host out of an absolute X-Original-URL.
-func originalURLHost(r *http.Request) string {
-	v := r.Header.Get("X-Original-URL")
+func forwardedViews(r *http.Request) []forwardedView {
+	var out []forwardedView
+
+	fwHost := firstHostInChain(r.Header.Get("X-Forwarded-Host"))
+	fwURI := r.Header.Get("X-Forwarded-Uri")
+	if fwHost != "" || fwURI != "" {
+		out = append(out, forwardedView{"forwarded", fwHost, fwURI})
+	}
+
+	if v := r.Header.Get("X-Original-URL"); v != "" {
+		vw := forwardedView{name: "original-url"}
+		if u, err := url.Parse(v); err == nil && u.Host != "" {
+			vw.host = u.Host
+			vw.uri = u.EscapedPath() // still-escaped: cleanURIPath decodes once
+		} else {
+			// Unparseable, or relative. Treat it as a path-only claim rather than
+			// ignoring it, so a malformed value cannot be used to dodge the
+			// conflict check.
+			vw.uri = v
+		}
+		out = append(out, vw)
+	}
+
+	oHost := firstHostInChain(r.Header.Get("X-Original-Host"))
+	oURI := r.Header.Get("X-Original-Uri")
+	if oHost != "" || oURI != "" {
+		out = append(out, forwardedView{"original", oHost, oURI})
+	}
+
+	return out
+}
+
+func firstHostInChain(v string) string {
 	if v == "" {
 		return ""
 	}
-	u, err := url.Parse(v)
-	if err != nil || u.Host == "" {
-		return ""
+	if i := strings.Index(v, ","); i != -1 {
+		v = v[:i] // a comma-joined chain: the first entry is the original host
 	}
-	return u.Host
+	return strings.TrimSpace(v)
 }
 
-// OriginalURI is the path the client actually requested, which on a forward-auth
-// subrequest is not this request's own path.
-func OriginalURI(r *http.Request) string {
-	for _, h := range []string{"X-Forwarded-Uri", "X-Original-Uri"} {
-		if v := r.Header.Get(h); v != "" {
-			return v
+// resolveTarget returns the canonical service and normalized path the request is
+// really for. conflict is true when two present conventions disagree, which every
+// caller MUST treat as a denial.
+//
+// Forwarded headers are evidence only from a trusted peer; a direct client is
+// described by its own request line and nothing else.
+func (c *Config) resolveTarget(r *http.Request) (service, uri string, conflict bool) {
+	service = jitcore.CanonServerName(r.Host)
+	uri = cleanURIPath(r.URL.EscapedPath())
+
+	peer, err := peerAddr(r)
+	if err != nil || !c.isTrusted(peer) {
+		return service, uri, false
+	}
+
+	var host, pathClaim, hostFrom, pathFrom string
+	for _, v := range forwardedViews(r) {
+		if v.host != "" {
+			h := jitcore.CanonServerName(v.host)
+			if host != "" && h != host {
+				logf("jitaccess: forwarded host conflict: %s=%q vs %s=%q — denying", hostFrom, host, v.name, h)
+				return "", "", true
+			}
+			host, hostFrom = h, v.name
+		}
+		if v.uri != "" {
+			u := cleanURIPath(v.uri)
+			if pathClaim != "" && u != pathClaim {
+				logf("jitaccess: forwarded uri conflict: %s=%q vs %s=%q — denying", pathFrom, pathClaim, v.name, u)
+				return "", "", true
+			}
+			pathClaim, pathFrom = u, v.name
 		}
 	}
-	// ingress-nginx sends an ABSOLUTE url here, so take just the path.
-	if v := r.Header.Get("X-Original-URL"); v != "" {
-		if u, err := url.Parse(v); err == nil && u.Path != "" {
-			return u.Path
-		}
-		return v
+	if host != "" {
+		service = host
 	}
-	return r.URL.Path
+	if pathClaim != "" {
+		uri = pathClaim
+	}
+	return service, uri, false
+}
+
+// ServiceName returns ONLY the service, discarding the path. It exists for tests
+// and callers that genuinely need just the host; a conflict yields "" so the
+// caller still denies (no configured service is named "").
+//
+// Prefer resolveTarget: it returns the conflict flag explicitly, and a caller
+// that ignores an ambiguous request is exactly the bug this whole mechanism
+// exists to prevent.
+func (c *Config) ServiceName(r *http.Request) string {
+	service, _, conflict := c.resolveTarget(r)
+	if conflict {
+		return ""
+	}
+	return service
+}
+
+// cleanURIPath reduces a forwarded request URI to the path the proxy will
+// actually route on: query/fragment stripped, percent-escapes decoded, and dot
+// segments resolved.
+//
+// nginx decodes %XX (including %2F) and resolves "." / ".." in
+// ngx_http_parse_complex_uri before matching a location, while $request_uri and
+// $scheme://$http_host$request_uri keep the raw form. Normalizing here is what
+// keeps the verifier's view of the request identical to the proxy's.
+func cleanURIPath(uri string) string {
+	if i := strings.IndexAny(uri, "?#"); i != -1 {
+		uri = uri[:i]
+	}
+	dec, err := url.PathUnescape(uri)
+	if err != nil {
+		// A malformed escape; nginx answers those with 400, so a well-behaved
+		// proxy never forwards one. Fail closed: "/" cannot match the protocol
+		// prefix, so the request falls through to the normal grant check.
+		return "/"
+	}
+	if !strings.HasPrefix(dec, "/") {
+		dec = "/" + dec
+	}
+	return path.Clean(dec)
 }

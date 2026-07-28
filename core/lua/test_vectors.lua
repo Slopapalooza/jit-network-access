@@ -44,9 +44,18 @@ for _, c in ipairs(V.canon_server_name) do
   ok(canon.canon_server_name(c["in"]) == c.out, "canon_server_name " .. c["in"])
 end
 
--- ip (skip the intentional-invalid vectors, marked "<invalid")
+-- ip
+--
+-- `valid == false` marks an input that MUST be rejected (a leading-zero IPv4
+-- octet, PROTOCOL §4 step 1). These used to be skipped outright, because the
+-- expected value was a Python exception string no other language could
+-- reproduce — which left the rejection rule untested in the very implementation
+-- that runs in production BunkerWeb. Assert the rejection instead.
 for _, c in ipairs(V.canon_ip) do
-  if c.out:sub(1, 8) ~= "<invalid" then
+  if c.valid == false then
+    local got = canon.canon_ip(c["in"], c.v6_prefix, c.v4_prefix)
+    ok(got == nil, "canon_ip REJECTS " .. c["in"] .. " (got " .. tostring(got) .. ")")
+  else
     ok(canon.canon_ip(c["in"], c.v6_prefix, c.v4_prefix) == c.out, "canon_ip " .. c["in"] .. "/" .. c.v6_prefix)
   end
 end

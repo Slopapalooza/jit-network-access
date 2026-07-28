@@ -17,7 +17,19 @@ async function main() {
     status.innerHTML = badge("n/a", "n") + " Not an http(s) page.";
     return;
   }
-  const host = new URL(res.origin).host;
+  // res.origin can be a non-http scheme (about:, data:, chrome-extension:) for
+  // which URL() has no host and, for opaque origins like "null", throws — which
+  // aborted the whole popup script and left the panel blank.
+  let host;
+  try {
+    host = new URL(res.origin).host;
+  } catch {
+    host = "";
+  }
+  if (!host) {
+    status.innerHTML = badge("n/a", "n") + " Not an http(s) page.";
+    return;
+  }
   if (!res.enrolled) {
     status.innerHTML = badge("Not protected", "n") + "<br><span class='muted'>" + host + "</span>";
     return;

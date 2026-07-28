@@ -110,6 +110,26 @@
     {
       "in": "9wiki.internal",
       "out": "9wiki.internal"
+    },
+    {
+      "in": "[2001:db8::1]",
+      "out": "2001:db8::1"
+    },
+    {
+      "in": "[2001:DB8::1]:8443",
+      "out": "2001:db8::1"
+    },
+    {
+      "in": "[ ::1 ]",
+      "out": "::1"
+    },
+    {
+      "in": "[::1]",
+      "out": "::1"
+    },
+    {
+      "in": "  grafana.example.com  ",
+      "out": "grafana.example.com"
     }
   ],
   "canon_ip": [
@@ -117,43 +137,145 @@
       "in": "1.2.3.4",
       "v6_prefix": 128,
       "v4_prefix": 32,
-      "out": "1.2.3.4"
+      "out": "1.2.3.4",
+      "valid": true
     },
     {
       "in": "192.168.001.005",
       "v6_prefix": 128,
       "v4_prefix": 32,
-      "out": "<invalid: '192.168.001.005' does not appear to be an IPv4 or IPv6 address>"
+      "out": null,
+      "valid": false,
+      "reason": "ipv4-leading-zero"
     },
     {
       "in": "2001:db8:0:0:0:0:0:1",
       "v6_prefix": 128,
       "v4_prefix": 32,
-      "out": "2001:db8::1"
+      "out": "2001:db8::1",
+      "valid": true
     },
     {
       "in": "2001:0DB8::1",
       "v6_prefix": 128,
       "v4_prefix": 32,
-      "out": "2001:db8::1"
+      "out": "2001:db8::1",
+      "valid": true
     },
     {
       "in": "::ffff:1.2.3.4",
       "v6_prefix": 128,
       "v4_prefix": 32,
-      "out": "1.2.3.4"
+      "out": "1.2.3.4",
+      "valid": true
     },
     {
       "in": "2001:db8:abcd:1234::1",
       "v6_prefix": 64,
       "v4_prefix": 32,
-      "out": "2001:db8:abcd:1234::"
+      "out": "2001:db8:abcd:1234::",
+      "valid": true
     },
     {
       "in": "2001:db8:abcd:1234:5678::9",
       "v6_prefix": 64,
       "v4_prefix": 32,
-      "out": "2001:db8:abcd:1234::"
+      "out": "2001:db8:abcd:1234::",
+      "valid": true
+    },
+    {
+      "in": "::ffff:01.2.3.4",
+      "v6_prefix": 128,
+      "v4_prefix": 32,
+      "out": null,
+      "valid": false,
+      "reason": "unparseable"
+    },
+    {
+      "in": "1::2::3",
+      "v6_prefix": 128,
+      "v4_prefix": 32,
+      "out": null,
+      "valid": false,
+      "reason": "unparseable"
+    },
+    {
+      "in": "2001:db8:::1",
+      "v6_prefix": 128,
+      "v4_prefix": 32,
+      "out": null,
+      "valid": false,
+      "reason": "unparseable"
+    },
+    {
+      "in": ":2001:db8::1",
+      "v6_prefix": 128,
+      "v4_prefix": 32,
+      "out": null,
+      "valid": false,
+      "reason": "unparseable"
+    },
+    {
+      "in": "2001:db8::1:",
+      "v6_prefix": 128,
+      "v4_prefix": 32,
+      "out": null,
+      "valid": false,
+      "reason": "unparseable"
+    },
+    {
+      "in": "192.168.1.256",
+      "v6_prefix": 128,
+      "v4_prefix": 32,
+      "out": null,
+      "valid": false,
+      "reason": "ipv4-octet-out-of-range"
+    },
+    {
+      "in": "",
+      "v6_prefix": 128,
+      "v4_prefix": 32,
+      "out": null,
+      "valid": false,
+      "reason": "unparseable"
+    },
+    {
+      "in": "::ffff:192.168.5.77",
+      "v6_prefix": 128,
+      "v4_prefix": 24,
+      "out": "192.168.5.0",
+      "valid": true
+    },
+    {
+      "in": "192.168.5.77",
+      "v6_prefix": 128,
+      "v4_prefix": 24,
+      "out": "192.168.5.0",
+      "valid": true
+    },
+    {
+      "in": "fe80::1%eth0",
+      "v6_prefix": 128,
+      "v4_prefix": 32,
+      "out": null,
+      "valid": false,
+      "reason": "zoned-address"
+    },
+    {
+      "in": "2001:db8::1",
+      "v6_prefix": 200,
+      "v4_prefix": 32,
+      "out": null,
+      "valid": false,
+      "reason": "prefix-out-of-range"
+    },
+    {
+      "in": "1.2.3.4",
+      "v6_prefix": 128,
+      "v4_prefix": 64,
+      "out": null,
+      "valid": false,
+      "reason": "prefix-out-of-range"
     }
   ],
   "proof": [

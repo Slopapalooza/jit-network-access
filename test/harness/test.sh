@@ -42,8 +42,14 @@ check "POST /jitaccess/grant -> 200" 200 "$(api /jitaccess/grant "{\"service\":\
 check "app-a after grant -> 200 (upstream)" 200 "$(svc app-a.local)"
 check "app-b still dark -> 404 (grant is scoped to app-a)" 404 "$(svc app-b.local)"
 
-echo "== protocol endpoints never pass through (M2 stub denies) =="
-check "granted app-a, /.well-known/jit-access/challenge -> 403" 403 "$(path app-a.local /.well-known/jit-access/challenge)"
+echo "== protocol endpoints are served by the plugin, never proxied upstream =="
+# This asserted 403 back when M2 was a stub that denied every protocol path. The
+# shipped plugin ANSWERS /challenge with 204 + X-JIT-Nonce, so the assertion has
+# been failing on every clean run since M2 landed — which is why the two probes
+# it precedes went unnoticed for so long. What actually matters is that the path
+# is handled by the gate and never reaches the upstream.
+check "granted app-a, /.well-known/jit-access/challenge -> 204 (minted by the gate)" 204 "$(path app-a.local /.well-known/jit-access/challenge)"
+check "granted app-a, unknown path under the prefix -> not proxied" 403 "$(path app-a.local /.well-known/jit-access/nope)"
 
 echo "== revoke re-darkens =="
 check "POST /jitaccess/revoke -> 200" 200 "$(api /jitaccess/revoke "{\"service\":\"app-a.local\",\"ip\":\"$IP\"}")"

@@ -44,7 +44,25 @@ export async function listTokens() {
   return tokens;
 }
 
-export async function enroll({ kid, secretBytes, origins, label }) {
+// allowReplace must be set explicitly to overwrite an existing kid.
+//
+// kids are chosen by the ENROLLMENT SERVER, and the extension may hold tokens
+// from several independent servers, so a collision is not necessarily the same
+// device re-enrolling — it can be an unrelated server (hostile or merely
+// careless) picking a kid already in use. Silently replacing it destroyed the
+// existing non-extractable key and, with it, access to origins the new token
+// says nothing about.
+export async function enroll({ kid, secretBytes, origins, label, allowReplace = false }) {
+  const existing = (await listTokens()).find((t) => t.kid === kid);
+  if (existing && !allowReplace) {
+    const err = new Error(
+      "a token with kid " + kid + " is already enrolled for " +
+      (existing.origins || []).join(", ") +
+      " — remove it first if you meant to replace it");
+    err.code = "kid-collision";
+    err.existing = existing;
+    throw err;
+  }
   const key = await importSecret(secretBytes);   // non-extractable
   await idbPut(kid, key);                          // only the key handle persists
   const tokens = (await listTokens()).filter((t) => t.kid !== kid);
