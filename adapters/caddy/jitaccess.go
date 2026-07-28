@@ -354,6 +354,8 @@ func (j *JITAccess) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 			return j.handleRespond(w, r, service, ip)
 		case r.URL.Path == p+"/enroll" && r.Method == http.MethodPost:
 			return j.handleEnroll(w, r, ip)
+		case r.URL.Path == p+"/register" && r.Method == http.MethodGet:
+			return j.handleRegister(w)
 		}
 		// any other path under the prefix stays dark
 		return j.deny(w, "protocol endpoint")
@@ -473,6 +475,18 @@ func (j *JITAccess) handleRespond(w http.ResponseWriter, r *http.Request, servic
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// handleRegister answers a registration link for a browser WITHOUT the
+// extension; an installed one intercepts that navigation client-side and never
+// reaches here. Identical for any code value, so it is no enrollment-code oracle.
+func (j *JITAccess) handleRegister(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer") // the URL carries a single-use code
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(jitcore.RegisterHTML)
 	return nil
 }
 

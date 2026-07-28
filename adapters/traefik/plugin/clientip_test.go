@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	jitcore "github.com/Slopapalooza/jit-network-access/adapters/traefik/plugin/internal/jitcore"
@@ -238,5 +239,38 @@ func TestXFFWalkAcrossRepeatedHeaderLines(t *testing.T) {
 	}
 	if ip != "198.51.100.7" {
 		t.Errorf("across repeated header lines got %q, want 198.51.100.7", ip)
+	}
+}
+
+// Mirror of the Caddy test: the register page is the only thing a browser
+// without the extension ever sees at a registration link.
+func TestRegisterLandingPage(t *testing.T) {
+	h := build(t, nil)
+
+	w := serve(h, mkreq(http.MethodGet, defaultPrefix+"/register?code=abc123", peer, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("register page while dark: got %d want 200", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, jitcore.ExtensionReleasesURL) {
+		t.Error("register page must link to the releases page")
+	}
+	if strings.Contains(body, "abc123") {
+		t.Error("SECURITY: the single-use enrollment code was echoed into the page")
+	}
+	if w.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Error("the URL carries a single-use code; referrer must be suppressed")
+	}
+	for _, q := range []string{"", "?code=", "?code=nope"} {
+		w2 := serve(h, mkreq(http.MethodGet, defaultPrefix+"/register"+q, peer, nil))
+		if w2.Code != http.StatusOK || w2.Body.String() != body {
+			t.Errorf("register page differs for %q — that is an enrollment-code oracle", q)
+		}
+	}
+	if w3 := serve(h, mkreq(http.MethodGet, defaultPrefix+"/registerx", peer, nil)); w3.Code == http.StatusOK {
+		t.Error("only the exact /register path may be served")
+	}
+	if w4 := serve(h, mkreq(http.MethodPost, defaultPrefix+"/register", peer, nil)); w4.Code == http.StatusOK {
+		t.Error("register is GET-only")
 	}
 }

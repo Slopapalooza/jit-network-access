@@ -66,23 +66,6 @@ Roadmap lives in [`DESIGN.md` §9](DESIGN.md). Current increment:
 - [x] **Adapter expansion + a live multi-engine lab.** Added a **native Traefik plugin** (Yaegi-interpreted, zero external dependencies, verified both compiled *and* under the interpreter), a **native OpenResty gate** (embeds `core/lua`), and **Kubernetes/ingress-nginx** manifests. [`test/harness/adapters`](test/harness/adapters) stands all five engines up side by side — Caddy, NGINX+Authorizer, Traefik, OpenResty, Kubernetes — gating the same service with the same token: **24/24 green, one token opened every engine.** Running them for real caught three defects that reading the code had not: the NGINX recipe wouldn't start (`proxy_pass` with a URI part is illegal in a named location), the Traefik plugin wouldn't load (Traefik derives its symbol from the import path's last element — needed `basePkg`), and the Kubernetes path both denied everything *and* proxied the knock endpoint off-cluster (a cross-namespace `ExternalName` resolved to a public address, and ingress-nginx carries the origin only in `X-Original-URL`, which the Authorizer didn't read).
 - [ ] **M6** — remaining Hardened profile (Redis shared backend + signed grant values, KEK/at-rest encryption, v3 client-keygen, authenticated proxy↔Authorizer boundary) + Envoy/HAProxy adapters
 
-### What is machine-verified in this repo vs. not
-
-This project is being developed on a host **without Lua or Docker**. Therefore:
-
-- **Verified here:** the conformance vectors are produced by the Python reference implementation (`core/testdata/generate_vectors.py`) and cross-checked with `openssl`; the crypto constructions (PAE, canonicalization, HMAC proof, nonce) are additionally reproduced by independent Node ports of the Lua algorithms. **The Go stack is fully executable on this host** — `core/go` (14 tests, all 29 vectors), the Authorizer (19 tests incl. forged-XFF, direct-exposure, replay, cross-service proof isolation, kid-existence oracle, malformed-`/respond` fuzz) and the Caddy module (13 tests) all run under `go test`, and both binaries were driven end-to-end by the Python knock client. Non-Lua artifacts are linted (compose YAML, bash `-n`, plugin.json, the registry job's self-test) and the plugin vendor/packaging step is exercised.
-- **Not run here, but validated on a live instance:** the Lua core and the BunkerWeb plugin cannot be *executed* locally (no Lua/Docker). They are syntax-checked against the Lua 5.1 grammar, written to match the shared vectors, and each milestone's behavior is confirmed on a real deployment. If a Lua assertion fails, the likely suspects are BunkerWeb-integration details (the `api()` response envelope, internal-API host/whitelist, plugin ordering), not the crypto core, which is pinned by the vectors in three languages.
-
-#### Tested on BunkerWeb 1.6.13
-
-Running in production on **1.6.13**, where the plugin loads and parses its token registry, holds its place in the access chain (`…antibot, jitaccess, mtls`), and the **full knock plus `ip+cookie` enforcement passes 12/12** from a clean network vantage — challenge → proof → grant → cookie-bound admission, with stealth denials returning 404 and no Lua errors.
-
-The M2.5 security suite needs **two** JIT-enabled services (it proves a proof minted for one cannot open the other), so it runs against the two-service docker harness in [`test/harness/`](test/harness/) — whose compose file pins 1.6.13 — rather than a single-service production host.
-
-## Status of the concept
-
-Early-stage. The design has been through a six-lens adversarial security review; its findings are consolidated in [`DESIGN.md` §11](DESIGN.md) and the code has been built to satisfy them from the start. Comments throughout the codebase cite individual findings by id (`SECURITY-REVIEW C1`, `H11`, …) so each defensive measure is traceable to the reason it exists — §11 is the published index of those ids.
-
 ## License
 
 **[GNU Affero General Public License v3.0 or later](LICENSE)** (AGPL-3.0-or-later).

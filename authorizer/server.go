@@ -433,7 +433,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	// the page links to.
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(registerHTML)
+	_, _ = w.Write(jitcore.RegisterHTML)
 }
 
 // ---- forward-auth ----------------------------------------------------------

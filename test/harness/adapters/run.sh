@@ -25,6 +25,7 @@ KC="python3 $repo/test/conformance/knock_client.py"
 KID="kid_lab"
 SECRET="AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"   # b64u(0x01 * 32)
 HOSTNAME_="app.example.com"
+STEALTH_HOST="stealth.example.com"
 
 # engine:port
 ENGINES=(
@@ -164,7 +165,36 @@ for spec in "${ENGINES[@]}"; do
   if [ -z "$trav_bad" ]; then ok "$name: traversal never reaches upstream"
   else bad "$name: traversal reached upstream" "$trav_bad"; fi
 
-  # 2. A malformed /respond must deny deliberately, never 5xx and never open.
+  # 2. Stealth mode must be INDISTINGUISHABLE from an unrouted path.
+  #
+  # Every engine in this lab used to pin failure_mode: interstitial, so the
+  # generic-reply path was exercised by no live-stack test — and OpenResty had no
+  # stealth coverage of any kind, not even a unit test. Each engine now also
+  # serves stealth.example.com in stealth mode.
+  sresolve="$STEALTH_HOST:$port:127.0.0.1"
+  sbase="http://$STEALTH_HOST:$port"
+  shape() { # status|content-type|body  for one request
+    curl -s -o /tmp/jit_body.$$ -w "%{http_code}|%{content_type}" --max-time 10          --resolve "$sresolve" "$@" 2>/dev/null
+    printf '|%s' "$(cat /tmp/jit_body.$$ 2>/dev/null)"; rm -f /tmp/jit_body.$$
+  }
+  unrouted=$(shape "$sbase/definitely-not-a-route-$$")
+  s_bad=""
+  for probe in "no-grant request:$sbase/"                "unknown path under the prefix:$sbase/.well-known/jit-access/nope"                "wrong method on challenge:-XPOST|$sbase/.well-known/jit-access/challenge"; do
+    label="${probe%%:*}"; rest="${probe#*:}"
+    if [ "${rest#*|}" != "$rest" ]; then got=$(shape "${rest%%|*}" "${rest#*|}"); else got=$(shape "$rest"); fi
+    [ "$got" != "$unrouted" ] && s_bad="$s_bad [$label: $got vs $unrouted]"
+  done
+  if [ -z "$s_bad" ]; then ok "$name: stealth replies are indistinguishable from an unrouted path"
+  else bad "$name: stealth is distinguishable" "$s_bad"; fi
+
+  # ...and stealth must never carry the interstitial's detection marker.
+  if curl -s -D- -o /dev/null --max-time 10 --resolve "$sresolve" "$sbase/" 2>/dev/null | grep -qi '^x-jit-access:'; then
+    bad "$name: stealth deny carries X-JIT-Access" "the marker advertises a gate the operator hid"
+  else
+    ok "$name: stealth deny carries no marker"
+  fi
+
+  # 3. A malformed /respond must deny deliberately, never 5xx and never open.
   mal_bad=""
   for b in '' 'not json' '{}' '{"v":1,"kid":"x","nonce":"@@@","proof":"@@@"}'; do
     c=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 --resolve "$resolve"           -X POST -H "Content-Type: application/json" --data "$b"           "$base/.well-known/jit-access/respond" 2>/dev/null)
