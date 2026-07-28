@@ -21,25 +21,51 @@ local _M = { _VERSION = "0.1.0" }
 
 -- ---- server_name -----------------------------------------------------------
 
-function _M.canon_server_name(host)
-  host = host:gsub("^%s+", ""):gsub("%s+$", "")
-  -- bracketed IPv6 literal [..]:port (defensive; server_name is normally a name)
-  local inner = host:match("^%[([^%]]+)%]")
-  if inner then
-    -- Trim the INNER text too. The Python and Go references both strip it
-    -- (h[1:end].strip() / strings.TrimSpace), so without this "[ ::1 ]"
-    -- canonicalized to "::1" on three engines and " ::1 " here — a different MAC
-    -- input and a different grant key for the same client, which is exactly the
-    -- cross-engine divergence the shared vectors exist to prevent.
-    inner = inner:gsub("^%s+", ""):gsub("%s+$", "")
-    return inner:lower()
+-- Trim whitespace and trailing dots to a fixpoint BEFORE the port strip as
+-- well as after. Doing it only after meant removing a trailing dot could
+-- expose a port that then survived to the next pass: "[:0." became "[:0"
+-- became "[", and "example.com:443." became "example.com:443" became
+-- "example.com". Two layers canonicalizing the same Host a different number
+-- of times would hold two different names for one service.
+local function trim_dots_and_space(s)
+  while true do
+    local t = s:gsub("^%s+", ""):gsub("%s+$", ""):gsub("%.$", "")
+    if t == s then return s end
+    s = t
   end
-  -- strip a trailing :port (a hostname contains no ':')
-  local h = host:match("^(.-):%d+$")
-  if h then host = h end
-  -- strip a single trailing dot
-  host = host:gsub("%.$", "")
-  return host:lower()
+end
+
+function _M.canon_server_name(host)
+  host = trim_dots_and_space(host)
+
+  -- A bracketed literal delimits its own host. The port strip below is guarded
+  -- by colon count alone rather than by "was it bracketed": no valid IPv6
+  -- address has exactly one colon, so the guard only ever protected malformed
+  -- input like "[a:80]" - which then canonicalized to "a:80" and, on a second
+  -- pass, to "a".
+  -- The inner text is trimmed because the Python and Go references both strip
+  -- it, so without it "[ ::1 ]" canonicalized to "::1" on three engines and
+  -- " ::1 " here -- a different MAC input and grant key for the same client.
+  -- [^%]]* not [^%]]+ : Go and Python treat [] as an empty bracketed host.
+  local inner = host:match("^%[([^%]]*)%]")
+  if inner then host = trim_dots_and_space(inner) end
+
+  -- Strip a trailing :port - but ONLY when the host has exactly one colon.
+  --
+  -- An unbracketed host with several colons is an IPv6 literal: RFC 3986
+  -- requires brackets to carry a port, so there is no port to strip. Stripping
+  -- anyway truncated "2001:db8::1" to "2001:db8:" - and "2001:db8::2" to the
+  -- SAME value, which is a cross-service collision in both the grant key and
+  -- the MAC input, the exact class PAE framing exists to prevent. It also made
+  -- the bracketed and unbracketed spellings of one host canonicalize
+  -- differently, so a grant made via one would not match a request via the
+  -- other.
+  local _, ncolons = host:gsub(":", "")
+  if ncolons == 1 then
+    local h = host:match("^(.-):%d+$")
+    if h then host = h end
+  end
+  return trim_dots_and_space(host):lower()
 end
 
 -- ---- ip --------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Line-for-line transliteration of canon.lua's canon_ip, run against the vectors.
+"""Line-for-line transliteration of canon.lua (canon_ip + canon_server_name).
 
     python3 core/lua/canon_port_check.py core/testdata/vectors.json
 
@@ -15,6 +15,11 @@ integer/float behaviour and the `bit` library are not modelled — but it catche
 the logic errors, which is where the failures have actually come from.
 
 Keep it in step with canon.lua when either changes.
+
+canon_server_name is modelled at the BYTE level on purpose: Lua strings are
+byte strings, %s and %d are ASCII-only, and string.lower() is C tolower() in
+the C locale. Python's str equivalents are all Unicode-aware, so a str-level
+port would hide exactly the divergences it exists to find.
 """
 import json
 import pathlib
@@ -147,6 +152,44 @@ def canon_ip(addr, v6_prefix=128, v4_prefix=32):
     return canon_ipv4(addr, v4_prefix)
 
 
+
+# ---- canon_server_name -----------------------------------------------------
+
+_LUA_SPACE = b" \t\n\x0b\x0c\r"          # Lua's "%s"
+_LUA_LOWER = bytes.maketrans(bytes(range(65, 91)), bytes(range(97, 123)))
+
+
+def _lua_trim(b):
+    return b.strip(_LUA_SPACE)
+
+
+def _lua_trim_dots_and_space(b):
+    while True:
+        t = _lua_trim(b)
+        if t.endswith(b"."):
+            t = t[:-1]
+        if t == b:
+            return b
+        b = t
+
+
+def canon_server_name(host):
+    """Models canon.lua's canon_server_name. Takes/returns str; works on bytes."""
+    b = _lua_trim_dots_and_space(host.encode("utf-8", "surrogatepass"))
+
+    m = re.match(rb"\[([^\]]*)\]", b)   # Lua: ^%[([^%]]*)%]
+    if m:
+        b = _lua_trim_dots_and_space(m.group(1))
+
+    if b.count(b":") == 1:
+        m = re.fullmatch(rb"(.*?):[0-9]+", b, re.S)   # Lua: ^(.-):%d+$
+        if m:
+            b = m.group(1)
+
+    b = _lua_trim_dots_and_space(b)
+    return b.translate(_LUA_LOWER).decode("utf-8", "surrogatepass")
+
+
 if __name__ == "__main__":
     vec = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
     fails = 0
@@ -172,5 +215,10 @@ if __name__ == "__main__":
         if got is None:
             fails += 1
             print(f"  FAIL {a!r} should be accepted, got rejected ({err})")
-    print(f"lua canon_ip port vs vectors: {'ALL PASS' if not fails else str(fails) + ' FAILURES'}")
+    for e in vec["canon_server_name"]:
+        got = canon_server_name(e["in"])
+        if got != e["out"]:
+            fails += 1
+            print(f"  FAIL canon_server_name {e['in']!r:26} expected={e['out']!r} got={got!r}")
+    print(f"lua canon port vs vectors: {'ALL PASS' if not fails else str(fails) + ' FAILURES'}")
     sys.exit(1 if fails else 0)

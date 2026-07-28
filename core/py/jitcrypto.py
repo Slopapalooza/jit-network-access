@@ -43,18 +43,65 @@ def pae(pieces) -> bytes:
 
 # ---- canonicalization ------------------------------------------------------
 
+# Lua's "%s" class. str.strip()/str.lower() are Unicode-aware and Lua's are not,
+# so a Host carrying U+00A0 or a non-ASCII letter canonicalized one way here and
+# another on the Lua engines. Hostnames are ASCII by IDNA, so pinning both to
+# ASCII costs nothing real and makes all four references byte-identical.
+_ASCII_SPACE = " \t\n\x0b\x0c\r"
+_ASCII_LOWER = bytes.maketrans(bytes(range(65, 91)), bytes(range(97, 123)))
+
+
+def _trim_dots_and_space(s: str) -> str:
+    """Trim whitespace and trailing dots to a fixpoint BEFORE the port strip as
+well as after. Doing it only after meant removing a trailing dot could
+expose a port that then survived to the next pass: "[:0." became "[:0"
+became "[", and "example.com:443." became "example.com:443" became
+"example.com". Two layers canonicalizing the same Host a different number
+of times would hold two different names for one service.
+    """
+    while True:
+        t = s.strip(_ASCII_SPACE)
+        if t.endswith("."):
+            t = t[:-1]
+        if t == s:
+            return s
+        s = t
+
+
 def canon_server_name(host: str) -> str:
-    h = host.strip()
+    h = _trim_dots_and_space(host)
+
+    # A bracketed literal delimits its own host. The port strip below is guarded
+    # by colon count alone rather than by "was it bracketed": no valid IPv6
+    # address has exactly one colon, so the guard only ever protected malformed
+    # input like "[a:80]" - which then canonicalized to "a:80" and, on a second
+    # pass, to "a".
     if h.startswith("["):
         end = h.find("]")
         if end != -1:
-            return h[1:end].strip().lower()
-    left, sep, right = h.rpartition(":")
-    if sep and right.isdigit():
-        h = left
-    if h.endswith("."):
-        h = h[:-1]
-    return h.lower()
+            h = _trim_dots_and_space(h[1:end])
+
+    # Strip a trailing :port - but ONLY when the host has exactly one colon.
+    #
+    # An unbracketed host with several colons is an IPv6 literal: RFC 3986
+    # requires brackets to carry a port, so there is no port to strip. Stripping
+    # anyway truncated "2001:db8::1" to "2001:db8:" - and "2001:db8::2" to the
+    # SAME value, which is a cross-service collision in both the grant key and
+    # the MAC input, the exact class PAE framing exists to prevent. It also made
+    # the bracketed and unbracketed spellings of one host canonicalize
+    # differently, so a grant made via one would not match a request via the
+    # other.
+    #
+    # isascii() matters: bare isdigit() is true for Unicode digits, so a host
+    # ending in Arabic-Indic digits lost its port here and kept it in the Go,
+    # Lua and JS references, which all match ASCII only.
+    if h.count(":") == 1:
+        left, sep, right = h.rpartition(":")
+        if sep and right.isascii() and right.isdigit():
+            h = left
+
+    h = _trim_dots_and_space(h)
+    return h.encode("utf-8", "surrogatepass").translate(_ASCII_LOWER).decode("utf-8", "surrogatepass")
 
 def canon_ip(addr: str, v6_prefix: int = 128, v4_prefix: int = 32) -> str:
     # Prefix bounds are validated, not silently clamped. Go and this reference

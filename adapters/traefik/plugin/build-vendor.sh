@@ -9,7 +9,10 @@
 # the core here keeps the plugin a self-contained module with ZERO external
 # dependencies, which is also the safest shape for Yaegi.
 #
-# The vendored copy is git-ignored; core/go stays the single source of truth.
+# The vendored copy IS committed — a Traefik plugin is fetched as source, so what
+# is in git is what runs. core/go stays the single source of truth; run this after
+# touching it. TestVendoredCoreIsInSyncWithCoreGo fails if you forget, which is
+# how a stale copy of the canonicalizers was caught shipping to this engine alone.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
