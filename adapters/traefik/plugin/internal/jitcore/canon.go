@@ -15,22 +15,76 @@ import (
 // identical to the Python and Lua references — a one-byte divergence between
 // engines silently breaks cross-engine portability (SECURITY-REVIEW H1/C10).
 
+// asciiSpace is Lua's "%s" character class. Go's strings.TrimSpace and
+// strings.ToLower are Unicode-aware and Lua's are not, so a Host carrying U+00A0
+// or a non-ASCII letter canonicalized one way on the Go engines and another on
+// the Lua ones — different MAC input and different grant key for one client.
+// Hostnames are ASCII by IDNA (non-ASCII travels as punycode), so restricting
+// both operations to ASCII costs nothing real and makes all four references
+// byte-identical.
+const asciiSpace = " \t\n\v\f\r"
+
+// asciiLower is byte-wise by design: an ASCII byte never appears inside a
+// multi-byte UTF-8 sequence, so this cannot corrupt non-ASCII input — it
+// leaves it alone, which is the point.
+func asciiLower(s string) string {
+	b := []byte(s)
+	for i := 0; i < len(b); i++ {
+		if b[i] >= 'A' && b[i] <= 'Z' {
+			b[i] += 'a' - 'A'
+		}
+	}
+	return string(b)
+}
+
+// Trim whitespace and trailing dots to a fixpoint BEFORE the port strip as
+// well as after. Doing it only after meant removing a trailing dot could
+// expose a port that then survived to the next pass: "[:0." became "[:0"
+// became "[", and "example.com:443." became "example.com:443" became
+// "example.com". Two layers canonicalizing the same Host a different number
+// of times would hold two different names for one service.
+func trimDotsAndSpace(s string) string {
+	for {
+		t := strings.TrimSuffix(strings.Trim(s, asciiSpace), ".")
+		if t == s {
+			return s
+		}
+		s = t
+	}
+}
+
 // CanonServerName lowercases the host and strips a trailing dot, an optional
 // :port, and IPv6 brackets. Mirrors canon_server_name in core/py/jitcrypto.py.
 func CanonServerName(host string) string {
-	h := strings.TrimSpace(host)
-	// bracketed IPv6 literal [::1]:443 (defensive; server_name is normally a name)
+	h := trimDotsAndSpace(host)
+
+	// A bracketed literal delimits its own host. The port strip below is guarded
+	// by colon count alone rather than by "was it bracketed": no valid IPv6
+	// address has exactly one colon, so the guard only ever protected malformed
+	// input like "[a:80]" - which then canonicalized to "a:80" and, on a second
+	// pass, to "a".
 	if strings.HasPrefix(h, "[") {
 		if end := strings.Index(h, "]"); end != -1 {
-			return strings.ToLower(strings.TrimSpace(h[1:end]))
+			h = trimDotsAndSpace(h[1:end])
 		}
 	}
-	// strip a trailing :port — only when what follows the last colon is all digits
-	if i := strings.LastIndex(h, ":"); i != -1 && isASCIIDigits(h[i+1:]) {
-		h = h[:i]
+
+	// Strip a trailing :port - but ONLY when the host has exactly one colon.
+	//
+	// An unbracketed host with several colons is an IPv6 literal: RFC 3986
+	// requires brackets to carry a port, so there is no port to strip. Stripping
+	// anyway truncated "2001:db8::1" to "2001:db8:" - and "2001:db8::2" to the
+	// SAME value, which is a cross-service collision in both the grant key and
+	// the MAC input, the exact class PAE framing exists to prevent. It also made
+	// the bracketed and unbracketed spellings of one host canonicalize
+	// differently, so a grant made via one would not match a request via the
+	// other.
+	if strings.Count(h, ":") == 1 {
+		if i := strings.LastIndex(h, ":"); i != -1 && isASCIIDigits(h[i+1:]) {
+			h = h[:i]
+		}
 	}
-	h = strings.TrimSuffix(h, ".") // a single trailing dot (root label)
-	return strings.ToLower(h)
+	return asciiLower(trimDotsAndSpace(h))
 }
 
 func isASCIIDigits(s string) bool {

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -844,4 +845,66 @@ func TestRegisterReachableWhileDark(t *testing.T) {
 	if w.Code != http.StatusNoContent {
 		t.Errorf("authz for the register link: got %d want 204", w.Code)
 	}
+}
+
+// Reclamation. Expiry is lazy on the read path so nothing here is required for
+// correctness — but without it the maps only grow, and an unauthenticated client
+// controls how fast. Untested until now.
+func TestSweepersReclaim(t *testing.T) {
+	s := testServer(t, func(c *Config) { c.RateLimit = 2 })
+	now := s.now()
+
+	// Rate-limit entries for many distinct sources, as a /64 sweep would create.
+	for i := 0; i < 500; i++ {
+		s.rl.allow("2001:db8::"+strconv.Itoa(i), 10, now)
+	}
+	if got := len(s.rl.window); got != 500 {
+		t.Fatalf("precondition: %d limiter entries, want 500", got)
+	}
+	s.rl.sweep(now + 61) // a minute later every window is finished
+	if got := len(s.rl.window); got != 0 {
+		t.Errorf("rate-limiter sweep left %d entries", got)
+	}
+
+	// Grants, spent nonces and enrollment codes.
+	s.grants.Put(&jitcore.Grant{V: 1, Kid: testKid, Service: svcA, IP: "1.2.3.4",
+		Binding: jitcore.BindingIP, Issued: now, Exp: now + 10})
+	s.nonces.Claim("some-nonce", now, 10)
+	s.codes.Put("some-code", &jitcore.EnrollCode{Kid: testKid, Exp: now + 10})
+
+	if n := s.grants.Sweep(now + 5); n != 0 {
+		t.Errorf("swept %d live grants — expiry is not being respected", n)
+	}
+	if n := s.grants.Sweep(now + 11); n != 1 {
+		t.Errorf("expired grant not reclaimed: swept %d", n)
+	}
+	if n := s.nonces.Sweep(now + 11); n != 1 {
+		t.Errorf("spent nonce not reclaimed: swept %d", n)
+	}
+	if n := s.codes.Sweep(now + 11); n != 1 {
+		t.Errorf("expired enrollment code not reclaimed: swept %d", n)
+	}
+
+	// A burned nonce must stay burned for its whole TTL, or replay reopens.
+	s2 := testServer(t, nil)
+	if !s2.nonces.Claim("n", now, 60) {
+		t.Fatal("first claim should succeed")
+	}
+	if s2.nonces.Claim("n", now+30, 60) {
+		t.Error("SECURITY: a spent nonce was reclaimable inside its TTL")
+	}
+	s2.nonces.Sweep(now + 30) // sweeping must not un-burn it either
+	if s2.nonces.Claim("n", now+31, 60) {
+		t.Error("SECURITY: sweeping released a nonce still inside its TTL")
+	}
+}
+
+// StartSweeper wires the above onto a ticker and must stop when told.
+func TestStartSweeperStops(t *testing.T) {
+	s := testServer(t, nil)
+	stop := make(chan struct{})
+	s.StartSweeper(stop)
+	close(stop)
+	// No assertion beyond "does not panic or leak past the stop signal"; the
+	// reclamation itself is covered above.
 }

@@ -130,6 +130,96 @@
     {
       "in": "  grafana.example.com  ",
       "out": "grafana.example.com"
+    },
+    {
+      "in": "2001:db8::1",
+      "out": "2001:db8::1",
+      "note": "unbracketed IPv6 keeps its last group"
+    },
+    {
+      "in": "2001:db8::2",
+      "out": "2001:db8::2",
+      "note": "...and stays distinct from ::1"
+    },
+    {
+      "in": "::1",
+      "out": "::1",
+      "note": "loopback literal is not a host:port"
+    },
+    {
+      "in": "fe80::1",
+      "out": "fe80::1",
+      "note": "link-local literal is not a host:port"
+    },
+    {
+      "in": "[a:80]",
+      "out": "a",
+      "note": "brackets around a non-IPv6 host still yield a port strip"
+    },
+    {
+      "in": "..",
+      "out": "",
+      "note": "every trailing dot goes, not just one"
+    },
+    {
+      "in": "...",
+      "out": "",
+      "note": "same, three"
+    },
+    {
+      "in": "example.com..",
+      "out": "example.com",
+      "note": "doubled root label"
+    },
+    {
+      "in": "example.com:443.",
+      "out": "example.com",
+      "note": "trailing dot must not hide the port from the strip"
+    },
+    {
+      "in": "[:0.",
+      "out": "[",
+      "note": "unterminated bracket, dot exposing a port"
+    },
+    {
+      "in": "host :80",
+      "out": "host",
+      "note": "space before the port does not survive"
+    },
+    {
+      "in": "[]",
+      "out": "",
+      "note": "empty bracketed host"
+    },
+    {
+      "in": "[]:80",
+      "out": "",
+      "note": "empty bracketed host with a port"
+    },
+    {
+      "in": "[example.com.]",
+      "out": "example.com",
+      "note": "bracketed name still loses its root label"
+    },
+    {
+      "in": "[example.com.]:443",
+      "out": "example.com",
+      "note": "...and its port"
+    },
+    {
+      "in": "host:٤٤٣",
+      "out": "host:٤٤٣",
+      "note": "Arabic-Indic digits are not a port"
+    },
+    {
+      "in": "CAFÉ.example.com",
+      "out": "cafÉ.example.com",
+      "note": "non-ASCII letters are left alone"
+    },
+    {
+      "in": "host ",
+      "out": "host ",
+      "note": "U+00A0 is not whitespace to trim"
     }
   ],
   "canon_ip": [

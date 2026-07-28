@@ -236,21 +236,6 @@ func (c *Config) resolveTarget(r *http.Request) (service, uri string, conflict b
 	return service, uri, false
 }
 
-// ServiceName returns ONLY the service, discarding the path. It exists for tests
-// and callers that genuinely need just the host; a conflict yields "" so the
-// caller still denies (no configured service is named "").
-//
-// Prefer resolveTarget: it returns the conflict flag explicitly, and a caller
-// that ignores an ambiguous request is exactly the bug this whole mechanism
-// exists to prevent.
-func (c *Config) ServiceName(r *http.Request) string {
-	service, _, conflict := c.resolveTarget(r)
-	if conflict {
-		return ""
-	}
-	return service
-}
-
 // cleanURIPath reduces a forwarded request URI to the path the proxy will
 // actually route on: query/fragment stripped, percent-escapes decoded, and dot
 // segments resolved.

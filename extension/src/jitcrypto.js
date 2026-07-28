@@ -54,13 +54,55 @@ export function pae(pieces) {
 
 // ---- canonicalization ------------------------------------------------------
 
+// Lua's "%s" class. String.trim()/toLowerCase() are Unicode-aware and Lua's are
+// not, so a Host carrying U+00A0 or a non-ASCII letter canonicalized one way here
+// and another on the Lua engines. Hostnames are ASCII by IDNA, so pinning both to
+// ASCII costs nothing real and makes all four references byte-identical.
+const ASCII_TRIM = /^[ \t\n\v\f\r]+|[ \t\n\v\f\r]+$/g;
+const asciiTrim = (s) => s.replace(ASCII_TRIM, "");
+const asciiLower = (s) => s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32));
+
+// Trim whitespace and trailing dots to a fixpoint BEFORE the port strip as
+// well as after. Doing it only after meant removing a trailing dot could
+// expose a port that then survived to the next pass: "[:0." became "[:0"
+// became "[", and "example.com:443." became "example.com:443" became
+// "example.com". Two layers canonicalizing the same Host a different number
+// of times would hold two different names for one service.
+function trimDotsAndSpace(s) {
+  for (;;) {
+    const t = asciiTrim(s).replace(/\.$/, "");
+    if (t === s) return s;
+    s = t;
+  }
+}
+
 export function canonServerName(host) {
-  let h = String(host).trim();
-  const m = h.match(/^\[([^\]]+)\]/);
-  if (m) return m[1].trim().toLowerCase();
-  const hp = h.match(/^(.*?):\d+$/);
-  if (hp) h = hp[1];
-  return h.replace(/\.$/, "").toLowerCase();
+  let h = trimDotsAndSpace(String(host));
+
+  // A bracketed literal delimits its own host. The port strip below is guarded
+  // by colon count alone rather than by "was it bracketed": no valid IPv6
+  // address has exactly one colon, so the guard only ever protected malformed
+  // input like "[a:80]" - which then canonicalized to "a:80" and, on a second
+  // pass, to "a".
+  // [^\]]* not [^\]]+ : Go and Python both treat [] as an empty bracketed host.
+  const m = h.match(/^\[([^\]]*)\]/);
+  if (m) h = trimDotsAndSpace(m[1]);
+
+  // Strip a trailing :port - but ONLY when the host has exactly one colon.
+  //
+  // An unbracketed host with several colons is an IPv6 literal: RFC 3986
+  // requires brackets to carry a port, so there is no port to strip. Stripping
+  // anyway truncated "2001:db8::1" to "2001:db8:" - and "2001:db8::2" to the
+  // SAME value, which is a cross-service collision in both the grant key and
+  // the MAC input, the exact class PAE framing exists to prevent. It also made
+  // the bracketed and unbracketed spellings of one host canonicalize
+  // differently, so a grant made via one would not match a request via the
+  // other.
+  if ((h.match(/:/g) || []).length === 1) {
+    const hp = h.match(/^(.*?):[0-9]+$/);
+    if (hp) h = hp[1];
+  }
+  return asciiLower(trimDotsAndSpace(h));
 }
 
 // ---- proof -----------------------------------------------------------------
