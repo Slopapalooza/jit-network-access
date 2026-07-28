@@ -270,6 +270,27 @@ func cleanURIPath(uri string) string {
 		// prefix, so the request falls through to the normal grant check.
 		return "/"
 	}
+	// Any '%' surviving one decode means the input was double-encoded
+	// ("%252e%252e" -> "%2e%2e", or "%25" -> "%"). nginx decodes once, so today
+	// its view and ours still agree — but that agreement is a property of the
+	// proxy, not of this function, and a component in front that decodes twice
+	// (some CDNs and WAFs do) would resolve "%252e%252e" to ".." while we would
+	// not. Rather than depend on every upstream decoding exactly once, refuse.
+	//
+	// '?' and '#' are refused for the same reason: an encoded "%3f" decodes to a
+	// literal '?' AFTER the query strip above, so it too is a character whose
+	// meaning depends on when you look.
+	//
+	// Costs nothing: the protocol prefix contains none of these, so a path that
+	// does can never be a protocol endpoint. It falls through to the normal
+	// grant check, which is the right answer for a path we cannot confidently
+	// normalize — and it is what makes this function idempotent.
+	//
+	// Both the double-encoding and the idempotency break were found by
+	// FuzzCleanURIPath, not by review.
+	if strings.ContainsAny(dec, "%?#") {
+		return "/"
+	}
 	if !strings.HasPrefix(dec, "/") {
 		dec = "/" + dec
 	}
