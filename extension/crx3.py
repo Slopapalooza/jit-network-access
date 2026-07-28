@@ -102,10 +102,23 @@ def extension_id(key_pem: pathlib.Path) -> str:
     return _id_from_spki(public_key_der(key_pem))
 
 
+# Every shipped file is text, and .gitattributes normalizes the repo to LF — so a
+# Linux checkout and a Windows working tree hold DIFFERENT bytes for identical
+# source. Normalizing here makes the archive CONTENT independent of who built it.
+CRLF = bytes([13, 10])
+LF = bytes([10])
+
+
 def zip_dir(src: pathlib.Path) -> bytes:
-    """Deterministic zip: sorted entries, fixed timestamps and modes, so an
-    unchanged tree yields a byte-identical artifact and a checksum means
-    something."""
+    """Zip with sorted entries, fixed timestamps and modes, and content
+    normalized to LF.
+
+    Reproducible for a given source tree AND toolchain — not across them: the
+    deflate stream depends on the zlib build, so a Windows and a Linux build of
+    the same commit produce archives whose ENTRIES are byte-identical but whose
+    containers differ by a few bytes. A published checksum therefore pins a
+    specific build, which is why one builder must own a release's artifacts (see
+    .github/workflows/extension-release.yml)."""
     # mkstemp hands back an OPEN descriptor; on Windows the file cannot be
     # unlinked until it is closed.
     fd, name = tempfile.mkstemp(suffix=".zip")
@@ -118,7 +131,7 @@ def zip_dir(src: pathlib.Path) -> bytes:
                 zi = zipfile.ZipInfo(arcname, (2026, 1, 1, 0, 0, 0))
                 zi.compress_type = zipfile.ZIP_DEFLATED
                 zi.external_attr = 0o644 << 16
-                z.writestr(zi, f.read_bytes())
+                z.writestr(zi, f.read_bytes().replace(CRLF, LF))
     data = tmp.read_bytes()
     tmp.unlink()
     return data

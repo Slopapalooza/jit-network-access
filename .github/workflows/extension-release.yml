@@ -118,12 +118,15 @@ jobs:
             fi
           } > notes.md
 
-          # Idempotent: a release may already exist when it was cut locally, which
-          # is the default path while the signing key deliberately stays off
-          # GitHub. Upload into it rather than failing the run.
+          # A release cut locally already carries the signed .crx and a SHA256SUMS
+          # covering BOTH artifacts. CI has no signing key, so uploading over it
+          # would replace that with a zip-only checksum file and leave the .crx
+          # unverifiable — and its .zip differs by a few container bytes anyway
+          # (see crx3.zip_dir). One builder owns a release's artifacts: leave it
+          # alone and let the build above stand as the validation it is.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "release $GITHUB_REF_NAME already exists; uploading artifacts"
-            gh release upload "$GITHUB_REF_NAME" extension/dist/* --clobber
+            echo "release $GITHUB_REF_NAME already exists (cut locally); not overwriting its artifacts"
+            echo "this run still validated the tree and published a build as a workflow artifact"
           else
             gh release create "$GITHUB_REF_NAME" \
               --title "Extension v$V" \
