@@ -1,0 +1,51 @@
+# JIT Network Access - Copyright (C) 2026 Slopapalooza
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# A one-off dependency bump is a snapshot; this is what keeps it true. The
+# advisories that mattered here (grpc, x/text, otel) all arrived in transitive
+# dependencies of Caddy, with no change to this repository.
+#
+# CI runs govulncheck on a weekly schedule as the backstop: Dependabot proposes,
+# govulncheck notices when nothing has been proposed and something is wrong.
+
+version: 2
+updates:
+  # Four separate Go modules, each resolved independently.
+  - package-ecosystem: gomod
+    directory: /core/go
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gomod
+    directory: /authorizer
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: gomod
+    directory: /adapters/caddy
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Caddy drags in a large transitive tree; one PR per patch bump would be
+      # unreadable and would not get reviewed, which defeats the point.
+      caddy-deps:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # No external dependencies by design — Traefik interprets this module under
+  # Yaegi and cannot fetch anything at plugin load. Listed so that if a
+  # dependency ever appears, it is watched rather than silently unwatched.
+  - package-ecosystem: gomod
+    directory: /adapters/traefik/plugin
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
