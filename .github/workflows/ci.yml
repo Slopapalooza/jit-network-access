@@ -118,7 +118,7 @@ jobs:
           go-version-file: core/go/go.mod
           cache-dependency-path: "**/go.sum"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
