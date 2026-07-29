@@ -35,14 +35,24 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
     ignore:
-      # cel-go is indirect and its version is decided by Caddy, not here. v0.29.0
-      # renamed interpreter.Interpretable to InterpretableV2 and caddy v2.11.4 is
-      # written against the old one, so the bump fails to compile inside Caddy's
-      # own celmatcher.go (PR #6). It has to move as part of a Caddy upgrade.
+      # cel-go is indirect and its version is Caddy's decision, not ours.
       #
-      # REMOVE THIS once Caddy is on a release that uses the v0.29 API, or the
-      # dependency silently stops being tracked. govulncheck reports 0 for this
-      # module on the current pin, so nothing is being deferred for security.
+      # This one is a KNOWN-ADVISORY DEFERRAL, not a clean skip. GHSA-gcjh-h69q-9w9g
+      # (medium, "JSON Private Fields Exposed via NativeTypes and ParseStructTag")
+      # covers >= 0.22.0, <= 0.28.1, and the first patched version is exactly the
+      # 0.29.0 that cannot be taken: it renames interpreter.Interpretable to
+      # InterpretableV2, and caddy v2.11.4 — the latest release — is written
+      # against the old API, so the bump fails to compile inside Caddy's own
+      # celmatcher.go (PR #6). There is no version of Caddy today that accepts the
+      # fix, so the choice is a broken build or the advisory.
+      #
+      # What makes the wait tolerable: govulncheck puts cel-go in "modules you
+      # require, but your code doesn't appear to call" — the vulnerable
+      # NativeTypes/ParseStructTag path is not reachable from this adapter, which
+      # registers no CEL types. That is reachability, NOT absence of the advisory.
+      #
+      # REMOVE THIS as soon as Caddy ships a release on the v0.29 API, and re-run
+      # govulncheck. Leaving it in place silently stops tracking a real advisory.
       - dependency-name: "github.com/google/cel-go"
 
   # No external dependencies by design — Traefik interprets this module under
