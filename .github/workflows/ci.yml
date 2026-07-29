@@ -106,8 +106,17 @@ jobs:
       # scanner would mean choosing between a current Go and a working scan.
       # It is a Google-maintained module fetched through the module proxy with
       # checksum verification, so it is not an unverified binary.
+      #
+      # working-directory matters and is not incidental: `go install pkg@version`
+      # ignores the surrounding module for dependency resolution, but it still
+      # picks the TOOLCHAIN from the go.mod it is standing in. setup-go installs
+      # the version from the `go` directive (1.24/1.25.1), so installing from the
+      # repo root builds the scanner with that and it then cannot type-check a
+      # 1.26 stdlib — "application built with go1.25". Standing in the module
+      # builds it with the pinned go1.26.5 instead.
       - name: install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        working-directory: ${{ matrix.module }}
 
       - name: scan
         run: govulncheck ./...
