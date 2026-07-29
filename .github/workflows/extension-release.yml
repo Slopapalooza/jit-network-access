@@ -75,7 +75,7 @@ jobs:
       - name: Show artifacts
         run: ls -l extension/dist && cat extension/dist/SHA256SUMS
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: jit-access-extension-${{ steps.ver.outputs.version }}
           path: extension/dist/*
