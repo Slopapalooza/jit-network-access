@@ -29,6 +29,19 @@ def main() -> int:
     kid = "kid_" + b64u(os.urandom(9))
     secret = b64u(os.urandom(32))
 
+    # This tool exists to hand a freshly-minted secret to an operator, so the
+    # secret HAS to reach stdout — CodeQL flags that as
+    # py/clear-text-logging-sensitive-data and it is intentional here, not a
+    # defect. What is worth guarding is the accident: piping this into a file or
+    # a CI log persists a live credential somewhere nobody is watching. Say so
+    # on stderr, which does not pollute the output being captured.
+    if not sys.stdout.isatty():
+        print(
+            "warning: output is being redirected and contains a live secret - "
+            "make sure the destination is not a log, a CI artifact or a repo.",
+            file=sys.stderr,
+        )
+
     print("# 1) Add to your GLOBAL config (use JIT_ACCESS_TOKEN, then _1/_2/... for more):")
     print(f"JIT_ACCESS_TOKEN={kid}:{secret}:{label}")
     print()

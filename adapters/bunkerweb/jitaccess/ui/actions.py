@@ -190,8 +190,12 @@ def _state_payload(db):
         tokens, services = _read_state(db)
         return {"tokens": tokens, "services": services}
     except BaseException as e:
+        # The detail goes to the server log, never into the response. str(e) on a
+        # DB failure carries connection strings, file paths and internal
+        # hostnames, and this payload is serialized straight back to the browser
+        # (CodeQL py/stack-trace-exposure).
         getLogger("UI").error(f"jitaccess state read: {e}")
-        return {"tokens": [], "services": [], "error": str(e)}
+        return {"tokens": [], "services": [], "error": "state unavailable"}
 
 
 def _json(Response, db, payload, status=200):
@@ -232,11 +236,16 @@ def jitaccess(**kwargs):
             return _regenerate(kwargs, db, request, Response)
         if action == "enroll":
             return _enroll(kwargs, db, request, Response)
-    except BaseException as e:
+    except BaseException:
+        # format_exc() already puts the whole traceback in the server log, which
+        # is where it belongs. Echoing str(e) to the client adds nothing an
+        # operator cannot get from the log and leaks internal detail into a page
+        # (CodeQL py/stack-trace-exposure).
         getLogger("UI").error(format_exc())
+        msg = "The operation failed. See the UI log for details."
         if _wants_json(request):
-            return _json(Response, db, {"ok": False, "message": f"The operation failed: {e}"}, status=500)
-        return Response(_page(request, "Error", f'<p class="err">The operation failed: {escape(str(e))}</p>'),
+            return _json(Response, db, {"ok": False, "message": msg}, status=500)
+        return Response(_page(request, "Error", f'<p class="err">{escape(msg)}</p>'),
                         mimetype="text/html", status=500)
     if _wants_json(request):
         return _json(Response, db, {"ok": False, "message": "Unknown action."}, status=400)
