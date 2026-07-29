@@ -45,7 +45,7 @@ jobs:
           - adapters/caddy
           - adapters/traefik/plugin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Install EXACTLY the pinned toolchain, read out of the module's go.mod.
       #
@@ -69,7 +69,7 @@ jobs:
           echo "resolved go$v from ${{ matrix.module }}/go.mod"
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ steps.toolchain.outputs.version }}
           cache-dependency-path: "**/go.sum"
@@ -113,7 +113,7 @@ jobs:
           - adapters/caddy
           - adapters/traefik/plugin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Install EXACTLY the pinned toolchain, read out of the module's go.mod.
       #
@@ -137,7 +137,7 @@ jobs:
           echo "resolved go$v from ${{ matrix.module }}/go.mod"
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ steps.toolchain.outputs.version }}
           cache-dependency-path: "**/go.sum"
@@ -170,18 +170,18 @@ jobs:
     name: cross-language conformance
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: core/go/go.mod
           cache-dependency-path: "**/go.sum"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
