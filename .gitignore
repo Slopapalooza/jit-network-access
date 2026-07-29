@@ -23,6 +23,13 @@ adapters/bunkerweb/jitaccess/core/*.lua
 adapters/bunkerweb/jitaccess.tar.gz
 test/harness/plugins/
 
+# Chrome Web Store upload assets. Listing artwork and screenshots are
+# regenerated from docs/img by make-assets.py and uploaded to the store, not
+# shipped from here. NOTE: files committed before this rule are still tracked —
+# .gitignore does not untrack anything — so `git rm --cached` them if they
+# should leave the repo too.
+extension/store-assets/
+
 # Editor / OS
 .DS_Store
 Thumbs.db
