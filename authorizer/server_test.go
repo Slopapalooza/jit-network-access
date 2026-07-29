@@ -141,11 +141,51 @@ func TestInterstitialCarriesMarkerAndStealthDoesNot(t *testing.T) {
 		c.Services[svcA] = ServiceConfig{Tokens: []string{testKid}, FailureMode: FailStealth}
 	})
 	w = authz(st, svcA, proxyIP, "/", nil)
-	if w.Code != http.StatusNotFound {
-		t.Errorf("stealth: got %d want 404", w.Code)
+	// 403, NOT 404 — and this assertion used to say 404, which is how the bug
+	// survived: it tested /authz as though it were a client-facing response.
+	// It is a subrequest. nginx's auth_request accepts ONLY 401 and 403 as a
+	// denial and turns anything else into a 500, so a stealth service behind
+	// nginx or ingress-nginx answered 500 to every gated request — maximally
+	// distinctive, and broken for legitimate users, who could no longer reach
+	// the interstitial to knock. Found on ingress-nginx by the five-engine lab.
+	if w.Code != http.StatusForbidden {
+		t.Errorf("stealth /authz: got %d want 403 (nginx auth_request 500s on anything else)", w.Code)
 	}
 	if w.Header().Get("X-JIT-Access") != "" {
 		t.Error("stealth mode must not advertise the gate")
+	}
+	// The client-facing surface is unchanged: a direct hit still 404s, because
+	// there the Authorizer IS what the client sees.
+	if d := do(st, req(http.MethodGet, svcA, "/nope", proxyIP, nil, nil)); d.Code != http.StatusNotFound {
+		t.Errorf("stealth direct hit: got %d want 404", d.Code)
+	}
+}
+
+// Every forward-auth denial must be a status nginx's auth_request understands.
+// Anything else becomes a 500 at the edge, which is both an outage and a louder
+// signal than the interstitial it was trying to avoid.
+func TestAuthzDenialsAreAlwaysProxyReadable(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode string
+	}{
+		{"interstitial", FailInterstitial},
+		{"stealth", FailStealth},
+	} {
+		s := testServer(t, func(c *Config) {
+			c.Services[svcA] = ServiceConfig{Tokens: []string{testKid}, FailureMode: tc.mode}
+		})
+		for _, probe := range []struct{ name, host, uri string }{
+			{"no grant", svcA, "/"},
+			{"unknown service", "not-configured.example.com", "/"},
+			{"bare prefix, not an endpoint", svcA, s.config().URIPrefix},
+		} {
+			w := authz(s, probe.host, proxyIP, probe.uri, nil)
+			if w.Code != http.StatusUnauthorized && w.Code != http.StatusForbidden {
+				t.Errorf("%s/%s: /authz answered %d — nginx auth_request turns that into a 500",
+					tc.name, probe.name, w.Code)
+			}
+		}
 	}
 }
 

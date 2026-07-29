@@ -438,6 +438,34 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 // ---- forward-auth ----------------------------------------------------------
 
+// authzDeny answers a forward-auth SUBREQUEST, where the status is consumed by
+// the proxy rather than the client.
+//
+// nginx's auth_request treats ONLY 401 and 403 as a denial and turns any other
+// status into a 500. deny()'s stealth branch answers 404 — right when the
+// Authorizer is serving the client directly, fatal here: every gated request to
+// a stealth service came back 500. That is worse than the leak it was trying to
+// avoid, because 500 is maximally distinctive AND the service is broken for
+// legitimate users, who can no longer reach the interstitial in order to knock.
+// Found by the five-engine lab on ingress-nginx.
+//
+// The failure mode still decides what the CLIENT sees. On forward-auth that is
+// the proxy's error page, and the marker is how the shipped recipes tell a JIT
+// denial from any other 403 — so stealth withholds it and interstitial sets it.
+// Turning that 403 into a 404 for a stealth service is the proxy's job; see
+// adapters/nginx and adapters/kubernetes.
+func (s *Server) authzDeny(w http.ResponseWriter, r *http.Request, c *reqCtx, reason string) {
+	mode := s.config().defaultFailureMode()
+	if c != nil && c.known {
+		mode = s.config().failureMode(c.svc)
+	}
+	if mode != FailStealth {
+		w.Header().Set("X-JIT-Access", JITMarker)
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusForbidden)
+}
+
 func (s *Server) handleAuthz(w http.ResponseWriter, r *http.Request) {
 	// /authz is an internal surface: a legitimate call always originates from
 	// the proxy. Refusing untrusted peers outright means that even if the
@@ -450,7 +478,7 @@ func (s *Server) handleAuthz(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.resolve(r)
 	if !ok {
 		// cannot identify the client — deny, never allow on ambiguity
-		s.deny(w, r, nil, "unresolved request")
+		s.authzDeny(w, r, nil, "unresolved request")
 		return
 	}
 	cfg := s.config()
@@ -475,7 +503,7 @@ func (s *Server) handleAuthz(w http.ResponseWriter, r *http.Request) {
 	// the fail-open choice; instead the operator opts a service in explicitly
 	// and anything else is denied.
 	if !c.known {
-		s.deny(w, r, c, "service not configured")
+		s.authzDeny(w, r, c, "service not configured")
 		return
 	}
 
@@ -490,7 +518,7 @@ func (s *Server) handleAuthz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.metrics.inc(&s.metrics.denied)
-	s.deny(w, r, c, "no grant")
+	s.authzDeny(w, r, c, "no grant")
 }
 
 // deny renders the configured failure mode. interstitial = 403 + marker header
