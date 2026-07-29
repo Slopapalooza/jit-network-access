@@ -34,6 +34,16 @@ updates:
       caddy-deps:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # cel-go is indirect and its version is decided by Caddy, not here. v0.29.0
+      # renamed interpreter.Interpretable to InterpretableV2 and caddy v2.11.4 is
+      # written against the old one, so the bump fails to compile inside Caddy's
+      # own celmatcher.go (PR #6). It has to move as part of a Caddy upgrade.
+      #
+      # REMOVE THIS once Caddy is on a release that uses the v0.29 API, or the
+      # dependency silently stops being tracked. govulncheck reports 0 for this
+      # module on the current pin, so nothing is being deferred for security.
+      - dependency-name: "github.com/google/cel-go"
 
   # No external dependencies by design — Traefik interprets this module under
   # Yaegi and cannot fetch anything at plugin load. Listed so that if a
