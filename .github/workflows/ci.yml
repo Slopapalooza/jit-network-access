@@ -1,0 +1,151 @@
+# JIT Network Access - Copyright (C) 2026 Slopapalooza
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Until this existed the repo had no Go CI at all, which is how four modules
+# ended up building against whatever toolchain the developer happened to have —
+# and how the authorizer accumulated eight reachable stdlib advisories without
+# anything saying so.
+#
+# Three things run here that cannot run on the maintainer's Windows host:
+#   * go test -race    — needs cgo and a C compiler
+#   * govulncheck      — needs to run per module, and is only meaningful if it
+#                        runs when nothing changed (a new advisory is news)
+#   * the Lua-adjacent conformance checks, together, on one machine
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly. Dependency advisories appear without anyone touching the code, so
+    # a scan that only runs on push is a scan that tells you late.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Honour the `toolchain` directive in each go.mod rather than whatever the
+  # runner ships. That directive is the whole point of this file.
+  GOTOOLCHAIN: auto
+
+jobs:
+  go:
+    name: go ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - core/go
+          - authorizer
+          - adapters/caddy
+          - adapters/traefik/plugin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - name: go version in use
+        run: go version
+        working-directory: ${{ matrix.module }}
+
+      - name: build
+        run: go build ./...
+        working-directory: ${{ matrix.module }}
+
+      - name: vet
+        run: go vet ./...
+        working-directory: ${{ matrix.module }}
+
+      # The stores are process-wide by design so a reload does not drop live
+      # grants, and they are written by concurrent request handlers AND by
+      # background sweepers. That is exactly the shape where a missing lock
+      # stays invisible until production load.
+      - name: test (race detector)
+        run: go test -race -count=1 ./...
+        working-directory: ${{ matrix.module }}
+
+      # go.mod / go.sum must already be tidy; a drifting one hides what is
+      # actually being compiled.
+      - name: go.mod is tidy
+        run: |
+          go mod tidy -diff
+        working-directory: ${{ matrix.module }}
+
+  vuln:
+    name: govulncheck ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - core/go
+          - authorizer
+          - adapters/caddy
+          - adapters/traefik/plugin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: "**/go.sum"
+
+      # Pinned rather than @latest: this is a security project, and an
+      # unpinned tool is an unreviewed binary in the pipeline. Bump on purpose.
+      - name: install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+
+      - name: scan
+        run: govulncheck ./...
+        working-directory: ${{ matrix.module }}
+
+  conformance:
+    name: cross-language conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go/go.mod
+          cache-dependency-path: "**/go.sum"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # canon_server_name and canon_ip decide the grant key and the MAC input in
+      # four languages. Everything below compares them against each other and
+      # against the pinned vectors; a divergence here is a cross-engine bypass.
+      - name: Lua port vs vectors
+        run: python3 core/lua/canon_port_check.py core/testdata/vectors.json
+
+      - name: browser crypto vs vectors
+        run: node src/jitcrypto.test.mjs
+        working-directory: extension
+
+      - name: enrollment consent logic
+        run: node src/enroll_core.test.mjs
+        working-directory: extension
+
+      - name: differential fuzz (Go vs Python vs JS vs Lua port)
+        run: python3 test/conformance/differential.py
+
+      # build.sh refuses to pack a bundle whose manifest lost its CSP or grew an
+      # externally_connectable entry, so running it is a security check as much
+      # as a packaging one. No signing key in CI here: unsigned zip only.
+      - name: extension bundle validates
+        run: ./build.sh
+        working-directory: extension
