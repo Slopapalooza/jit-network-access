@@ -52,10 +52,27 @@ echo "==> deploying the Authorizer, the protected service and both Ingresses"
 # gates snippets behind --annotations-risk-level=Critical, so without this the
 # annotation is either rejected by the admission webhook or silently ignored and
 # the lab exercises a configuration production does not use.
-${SUDO:-sudo} kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge   -p '{"data":{"allow-snippet-annotations":"true"}}' >/dev/null 2>&1 || true
+# annotations-risk-level is the half this was missing: the comment above named
+# it but the patch only set allow-snippet-annotations, so the admission webhook
+# still refused the gated Ingress with
+#   "annotation group ExternalAuth contains risky annotation based on ingress
+#    configuration"
+# On an existing cluster that is invisible — the previously-created Ingress is
+# left in place and everything still passes — but a lab built from scratch never
+# gets the gated Ingress at all.
+${SUDO:-sudo} kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge \
+  -p '{"data":{"allow-snippet-annotations":"true","annotations-risk-level":"Critical"}}' >/dev/null 2>&1 || true
 ${SUDO:-sudo} kubectl -n ingress-nginx rollout restart deploy/ingress-nginx-controller >/dev/null 2>&1 || true
 ${SUDO:-sudo} kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s >/dev/null 2>&1 || true
 $KUBECTL apply -f "$here/lab-manifests.yaml"
+
+# `kind load docker-image` replaces the image on the node, but the Deployment
+# spec is unchanged, so Kubernetes has no reason to roll the pod and it keeps
+# running the OLD build. Re-running this script therefore appeared to update the
+# Authorizer while testing code from whenever the pod last started — which is
+# exactly how a traversal probe "failed" against a fix that was already in.
+# Force the roll so the image that was just loaded is the one being tested.
+$KUBECTL -n jit-system rollout restart deploy/jit-authorizer
 $KUBECTL -n jit-system rollout status deploy/jit-authorizer --timeout=180s
 $KUBECTL -n default    rollout status deploy/upstream       --timeout=180s
 
