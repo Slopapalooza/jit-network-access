@@ -15,6 +15,16 @@ metadata:
   annotations:
     # deliberately NO auth-url here
     nginx.ingress.kubernetes.io/proxy-body-size: 8k
+    # Required for stealth services on ingress-nginx. The Authorizer answers a
+    # rejected request on a stealth service with Go's http.NotFound, chosen
+    # because it matches what its own mux serves for an unrouted path — true
+    # standalone, false here, where the CONTROLLER serves unrouted paths with an
+    # HTML 404. Without this, a wrong method on /challenge returns text/plain
+    # "404 page not found" next to the controller's HTML 404 and locates the
+    # gate in a single request. The Authorizer cannot know what its proxy's 404
+    # looks like, so the controller substitutes its own. Only 404 is
+    # intercepted; a real knock (200, 204) is untouched.
+    nginx.ingress.kubernetes.io/custom-http-errors: "404"
 spec:
   ingressClassName: nginx
   rules:

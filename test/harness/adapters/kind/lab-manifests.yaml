@@ -86,7 +86,22 @@ spec:
 #    can silently land on a PUBLIC address if that name doesn't resolve there.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
-metadata: { name: app-jit-protocol, namespace: jit-system }
+metadata:
+  name: app-jit-protocol
+  namespace: jit-system
+  annotations:
+    # The last piece of stealth on this engine. The Authorizer answers a
+    # rejected request on a stealth service with http.NotFound, chosen because
+    # it is exactly what its own mux serves for an unrouted path — true when the
+    # Authorizer is what serves unrouted paths, false here, where the CONTROLLER
+    # does. So Go's "404 page not found" (text/plain) sat next to nginx's HTML
+    # 404 and a wrong method on /challenge located the gate in one request.
+    #
+    # The Authorizer cannot know what its proxy's 404 looks like. This makes the
+    # controller intercept a 404 from the backend and serve its own, so the two
+    # are byte-identical. Only 404 is intercepted, so a real knock (200 on
+    # /challenge, 204 on /respond) is untouched.
+    nginx.ingress.kubernetes.io/custom-http-errors: "404"
 #
 # Exact paths, NOT a Prefix over the whole /.well-known/jit-access/ tree.
 #
