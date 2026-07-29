@@ -15,49 +15,32 @@ metadata:
   annotations:
     # deliberately NO auth-url here
     nginx.ingress.kubernetes.io/proxy-body-size: 8k
-    # Required for stealth services on ingress-nginx. The Authorizer answers a
-    # rejected request on a stealth service with Go's http.NotFound, chosen
-    # because it matches what its own mux serves for an unrouted path — true
-    # standalone, false here, where the CONTROLLER serves unrouted paths with an
-    # HTML 404. Without this, a wrong method on /challenge returns text/plain
-    # "404 page not found" next to the controller's HTML 404 and locates the
-    # gate in a single request. The Authorizer cannot know what its proxy's 404
-    # looks like, so the controller substitutes its own. Only 404 is
-    # intercepted; a real knock (200, 204) is untouched.
-    nginx.ingress.kubernetes.io/custom-http-errors: "404"
 spec:
   ingressClassName: nginx
   rules:
-    # Exact paths, NOT a Prefix over the whole tree. A Prefix rule routes
-    # EVERY path under /.well-known/jit-access/ to the Authorizer with no auth
-    # in front of it, which is much more surface than the protocol needs — only
-    # these four endpoints have to be reachable before a knock.
+    # Prefix over the whole tree, deliberately, and it must STAY a prefix.
     #
-    # It also breaks stealth. An unknown path under a Prefix rule reaches the
-    # Authorizer and is answered by Go's "404 page not found" (text/plain),
-    # while an unrouted host on the same controller gets nginx's HTML 404. That
-    # difference announces that a JIT gate is mounted on a service configured to
-    # look like it is not there. With Exact paths the unknown path falls through
-    # to the gated rule and gets the controller's own error page instead.
+    # Narrowing this to Exact rules for the four endpoints looks like an
+    # improvement — less unauthenticated surface — and it is a live gate bypass.
+    # The Authorizer's /authz carve-out lets ANY path under the prefix through
+    # without a grant, because it assumes the proxy routes those paths to the
+    # Authorizer rather than to your app. Exact rules break that agreement: a
+    # request for /.well-known/jit-access/anything stops matching this Ingress,
+    # falls through to the gated rule, is waved through by the carve-out, and
+    # reaches the upstream unauthenticated. The lab caught exactly that.
+    #
+    # If this is ever narrowed, the Authorizer's carve-out has to be narrowed in
+    # the same change, not after it.
     - host: app.example.com
       http:
         paths:
-          - path: /.well-known/jit-access/challenge
-            pathType: Exact
-            backend: &authorizer
+          - path: /.well-known/jit-access/
+            pathType: Prefix
+            backend:
               service:
                 name: jit-authorizer
                 port:
                   number: 8998
-          - path: /.well-known/jit-access/respond
-            pathType: Exact
-            backend: *authorizer
-          - path: /.well-known/jit-access/enroll
-            pathType: Exact
-            backend: *authorizer
-          - path: /.well-known/jit-access/register
-            pathType: Exact
-            backend: *authorizer
   tls:
     - hosts: [app.example.com]
       secretName: app-example-com-tls
