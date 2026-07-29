@@ -69,7 +69,7 @@ jobs:
           echo "resolved go$v from ${{ matrix.module }}/go.mod"
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ steps.toolchain.outputs.version }}
           cache-dependency-path: "**/go.sum"
@@ -137,7 +137,7 @@ jobs:
           echo "resolved go$v from ${{ matrix.module }}/go.mod"
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ steps.toolchain.outputs.version }}
           cache-dependency-path: "**/go.sum"
@@ -172,7 +172,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: core/go/go.mod
           cache-dependency-path: "**/go.sum"
