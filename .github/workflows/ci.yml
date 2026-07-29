@@ -47,9 +47,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Install EXACTLY the pinned toolchain, read out of the module's go.mod.
+      #
+      # go-version-file takes the `go` directive (1.24 / 1.25.1), NOT the
+      # `toolchain` line, so the runner's default Go was older than the pin. A
+      # build inside the module then switches up to the pinned toolchain and is
+      # fine, which is why the build/test jobs passed — but `go install
+      # pkg@version` did not, so govulncheck was built by the older Go and could
+      # not type-check a 1.26 stdlib:
+      #   file requires newer Go version go1.26 (application built with go1.25)
+      # Reading the pin here keeps one source of truth (the go.mod) rather than
+      # repeating the version in this file, where it would drift.
+      - name: resolve pinned toolchain
+        id: toolchain
+        run: |
+          v=$(sed -n 's/^toolchain go//p' "${{ matrix.module }}/go.mod" | tr -d '[:space:]')
+          if [ -z "$v" ]; then
+            echo "::error::${{ matrix.module }}/go.mod has no toolchain directive"
+            exit 1
+          fi
+          echo "resolved go$v from ${{ matrix.module }}/go.mod"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-go@v5
         with:
-          go-version-file: ${{ matrix.module }}/go.mod
+          go-version: ${{ steps.toolchain.outputs.version }}
           cache-dependency-path: "**/go.sum"
 
       - name: go version in use
@@ -93,9 +115,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Install EXACTLY the pinned toolchain, read out of the module's go.mod.
+      #
+      # go-version-file takes the `go` directive (1.24 / 1.25.1), NOT the
+      # `toolchain` line, so the runner's default Go was older than the pin. A
+      # build inside the module then switches up to the pinned toolchain and is
+      # fine, which is why the build/test jobs passed — but `go install
+      # pkg@version` did not, so govulncheck was built by the older Go and could
+      # not type-check a 1.26 stdlib:
+      #   file requires newer Go version go1.26 (application built with go1.25)
+      # Reading the pin here keeps one source of truth (the go.mod) rather than
+      # repeating the version in this file, where it would drift.
+      - name: resolve pinned toolchain
+        id: toolchain
+        run: |
+          v=$(sed -n 's/^toolchain go//p' "${{ matrix.module }}/go.mod" | tr -d '[:space:]')
+          if [ -z "$v" ]; then
+            echo "::error::${{ matrix.module }}/go.mod has no toolchain directive"
+            exit 1
+          fi
+          echo "resolved go$v from ${{ matrix.module }}/go.mod"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-go@v5
         with:
-          go-version-file: ${{ matrix.module }}/go.mod
+          go-version: ${{ steps.toolchain.outputs.version }}
           cache-dependency-path: "**/go.sum"
 
       # @latest, deliberately, after pinning to v1.1.4 failed: govulncheck has to
