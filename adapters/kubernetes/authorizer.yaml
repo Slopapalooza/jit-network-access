@@ -19,7 +19,7 @@ stringData:
   # rather than a ConfigMap — restrict it with RBAC and consider a sealed/
   # external secret in production.
   #
-  # NOTE: the Authorizer parses this with DisallowUnknownFields — an unrecognised
+  # NOTE: the Authorizer parses this with DisallowUnknownFields — an unrecognized
   # key is a startup error, so keep explanatory notes here in YAML, never inside
   # the JSON below.
   #

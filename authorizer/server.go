@@ -537,7 +537,7 @@ func (s *Server) handleAuthz(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deny(w http.ResponseWriter, r *http.Request, c *reqCtx, reason string) {
 	cfg := s.config()
 	mode := cfg.defaultFailureMode()
-	// c.known matters, not just c != nil: an unrecognised Host resolves fine but
+	// c.known matters, not just c != nil: an unrecognized Host resolves fine but
 	// carries a ZERO ServiceConfig, and failureMode("") reads as interstitial —
 	// so on a stealth-only deployment any request with an unknown Host answered
 	// with the branded page and the X-JIT-Access marker, advertising a gate the

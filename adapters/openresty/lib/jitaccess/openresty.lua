@@ -209,7 +209,7 @@ end
 
 -- interstitial = 403 + detection marker; stealth = bare 404.
 -- default_failure_mode is what deny() uses when there is no service to consult
--- (unknown host, uninitialised gate). It defaults to the STRICTER of the modes
+-- (unknown host, uninitialized gate). It defaults to the STRICTER of the modes
 -- configured, so a deployment that asked for stealth anywhere never answers an
 -- unknown host with the branded interstitial + X-JIT-Access marker.
 local function default_failure_mode()

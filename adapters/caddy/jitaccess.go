@@ -142,7 +142,7 @@ type JITAccess struct {
 	// trusted_proxies: that defaults to a left-most X-Forwarded-For read unless
 	// trusted_proxies_strict is also set, which would let any client behind the
 	// proxy nominate its own grant key. Keeping our own list makes the safe
-	// behaviour the only behaviour.
+	// behavior the only behavior.
 	TrustedProxies []string `json:"trusted_proxies,omitempty"`
 
 	reg     *jitcore.Registry

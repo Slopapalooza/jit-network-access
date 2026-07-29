@@ -165,7 +165,7 @@ func TestDefaultIgnoresForwardedEntirely(t *testing.T) {
 	sp := mkreq(http.MethodGet, "/dashboard", "198.51.100.50:1234", nil)
 	sp.Header.Set("X-Forwarded-For", "203.0.113.9")
 	if w := serve(h, sp); w.Body.String() == "UPSTREAM" {
-		t.Error("SECURITY: XFF was honoured with trustForwarded off")
+		t.Error("SECURITY: XFF was honored with trustForwarded off")
 	}
 }
 

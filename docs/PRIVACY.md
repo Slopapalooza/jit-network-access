@@ -9,7 +9,7 @@ Chrome and other Chromium browsers, published from
 The extension collects nothing. There is no analytics, no telemetry, no
 crash reporting, no advertising identifier, and no third-party service of any
 kind. Nothing is sent to the publisher. The only servers it ever contacts are
-the ones **you** enrolled it against — servers your own organisation runs.
+the ones **you** enrolled it against — servers your own organization runs.
 
 ## What the extension stores, and where
 
@@ -58,10 +58,10 @@ not record them.
 | Permission | What it is used for |
 |---|---|
 | `storage` | The local storage described above |
-| `webNavigation` | Notice that you are navigating to an enrolled origin so the knock can run, and recognise an enrollment link so it can be confirmed inside the extension |
+| `webNavigation` | Notice that you are navigating to an enrolled origin so the knock can run, and recognize an enrollment link so it can be confirmed inside the extension |
 | `webRequest` | Notice a response from an enrolled origin that indicates a grant has expired, so the next visit re-knocks. Registered **only** for origins you have granted — never for all sites |
 | `tabs` | Read the active tab's URL so the toolbar popup can show whether that site is protected, locked or unlocked, and reload the tab after a successful knock |
-| Host access (`https://…`) | Declared as an **optional** permission and requested one origin at a time, on your click, during enrollment. Internal hostnames differ per organisation and cannot be listed when the extension is published, which is why the declaration is broad; the grant you actually give is not |
+| Host access (`https://…`) | Declared as an **optional** permission and requested one origin at a time, on your click, during enrollment. Internal hostnames differ per organization and cannot be listed when the extension is published, which is why the declaration is broad; the grant you actually give is not |
 
 The extension executes no remotely-hosted code. All scripts ship inside the
 package and its Content Security Policy pins `script-src 'self'`.

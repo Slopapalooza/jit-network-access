@@ -28,7 +28,7 @@ anything the client sent.
 
 **Keep the Authorizer off the internet.** It must be bound to loopback or an
 internal interface. It refuses `/authz` and `/admin/*` from peers outside
-`trusted_proxies` as a second line of defence, but the listener is the first.
+`trusted_proxies` as a second line of defense, but the listener is the first.
 
 If NGINX itself is behind a CDN/load balancer, set `$remote_addr` correctly with
 `real_ip_module` (`set_real_ip_from` = the exact front-door hops, never a broad

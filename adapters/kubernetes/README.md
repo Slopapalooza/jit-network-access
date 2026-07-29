@@ -136,7 +136,7 @@ own request fail; it cannot select someone else's service or open the protocol
 carve-out.
 
 Blanking the unused ones with an `auth-snippet` is still worth doing — it turns a
-confusing denial into a clean one — but it is defence in depth now, not the thing
+confusing denial into a clean one — but it is defense in depth now, not the thing
 standing between a client and someone else's grant:
 
 ```yaml

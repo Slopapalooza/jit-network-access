@@ -11,7 +11,7 @@ opens transparently — no visible login, no manual step.
 
    - **Registration URL (easiest — nothing to copy).** Your admin hands you a link like
      `https://app.example.com/.well-known/jit-access/register?code=<code>&origins=…`.
-     Just browse to it: the extension recognises the pattern, opens its own confirm
+     Just browse to it: the extension recognizes the pattern, opens its own confirm
      page listing the site(s), and one **Enroll** click grants permission and pulls
      the secret via a one-time-code exchange. The secret is never in the link.
    - **Setup string via options.** Open the extension's **options** page and paste a
