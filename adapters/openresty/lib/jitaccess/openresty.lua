@@ -125,13 +125,41 @@ end
 -- gate the operator configured to be invisible.
 local function service_name()
   local sn = ngx.var.server_name
+  local from_sn
   if sn and sn ~= "" and sn ~= "_" then
-    return ccanon.canon_server_name(sn)
+    from_sn = ccanon.canon_server_name(sn)
   end
+
   local h = ngx.var.host
-  if not h or h == "" then return nil end
-  local canon = ccanon.canon_server_name(h)
-  if canon and cfg and cfg.services[canon] then return canon end
+  local from_host
+  if h and h ~= "" then
+    from_host = ccanon.canon_server_name(h)
+  end
+
+  -- $server_name is the FIRST name in the matched block's server_name
+  -- directive, NOT the name that actually matched. So one block listing several
+  -- gated hosts —
+  --     server_name app.example.com secret.example.com;
+  -- — collapses them onto "app.example.com": the wrong allow-list, the wrong
+  -- binding, the wrong failure_mode (a service configured stealth answers with
+  -- the interstitial and its X-JIT-Access marker), and, worst, ONE service
+  -- identity shared by distinct hosts, so a grant earned for one opens the
+  -- other. That is the cross-service collision the PAE framing exists to stop,
+  -- reintroduced by an nginx variable that cannot express which name matched.
+  --
+  -- nginx does not tell us which name it matched, so when the Host names a
+  -- DIFFERENT configured service we cannot resolve it — refuse instead of
+  -- guessing. Found by the multi-engine lab, which had exactly this shape.
+  if from_sn and from_host and from_sn ~= from_host
+     and cfg and cfg.services[from_sn] and cfg.services[from_host] then
+    ngx.log(ngx.ERR, "jitaccess: ambiguous service — server_name resolves to '",
+            from_sn, "' but Host is '", from_host, "', and both are configured ",
+            "services. Give every JIT-gated host its own server block.")
+    return nil
+  end
+
+  if from_sn then return from_sn end
+  if from_host and cfg and cfg.services[from_host] then return from_host end
   return nil
 end
 

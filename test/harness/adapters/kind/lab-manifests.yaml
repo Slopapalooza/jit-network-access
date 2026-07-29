@@ -87,21 +87,35 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata: { name: app-jit-protocol, namespace: jit-system }
+#
+# Exact paths, NOT a Prefix over the whole /.well-known/jit-access/ tree.
+#
+# Two reasons, both found by the lab. A Prefix route sends every path under it to
+# the Authorizer with no auth at all, which is far more surface than the protocol
+# needs — only these four endpoints must be reachable before a knock. And it
+# breaks stealth: an unknown path under the prefix reached the Authorizer and got
+# Go's "404 page not found" (text/plain), while an unrouted host on the same
+# controller gets nginx's HTML 404. The difference tells an attacker a JIT gate
+# is mounted on a service whose whole purpose is to look like it is not there.
+# With Exact paths the unknown path falls through to the gated rule instead and
+# is answered by ingress-nginx's own error page, like any other path.
 spec:
   ingressClassName: nginx
   rules:
     - host: app.example.com
       http:
         paths:
-          - path: /.well-known/jit-access/
-            pathType: Prefix
-            backend: { service: { name: jit-authorizer, port: { number: 8998 } } }
+          - { path: /.well-known/jit-access/challenge, pathType: Exact, backend: { service: { name: jit-authorizer, port: { number: 8998 } } } }
+          - { path: /.well-known/jit-access/respond,   pathType: Exact, backend: { service: { name: jit-authorizer, port: { number: 8998 } } } }
+          - { path: /.well-known/jit-access/enroll,    pathType: Exact, backend: { service: { name: jit-authorizer, port: { number: 8998 } } } }
+          - { path: /.well-known/jit-access/register,  pathType: Exact, backend: { service: { name: jit-authorizer, port: { number: 8998 } } } }
     - host: stealth.example.com
       http:
         paths:
-          - path: /.well-known/jit-access/
-            pathType: Prefix
-            backend: { service: { name: jit-authorizer, port: { number: 8998 } } }
+          - { path: /.well-known/jit-access/challenge, pathType: Exact, backend: { service: { name: jit-authorizer, port: { number: 8998 } } } }
+          - { path: /.well-known/jit-access/respond,   pathType: Exact, backend: { service: { name: jit-authorizer, port: { number: 8998 } } } }
+          - { path: /.well-known/jit-access/enroll,    pathType: Exact, backend: { service: { name: jit-authorizer, port: { number: 8998 } } } }
+          - { path: /.well-known/jit-access/register,  pathType: Exact, backend: { service: { name: jit-authorizer, port: { number: 8998 } } } }
 ---
 # 2. the gated site
 apiVersion: networking.k8s.io/v1

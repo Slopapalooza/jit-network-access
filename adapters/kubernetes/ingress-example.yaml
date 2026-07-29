@@ -18,16 +18,36 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
+    # Exact paths, NOT a Prefix over the whole tree. A Prefix rule routes
+    # EVERY path under /.well-known/jit-access/ to the Authorizer with no auth
+    # in front of it, which is much more surface than the protocol needs — only
+    # these four endpoints have to be reachable before a knock.
+    #
+    # It also breaks stealth. An unknown path under a Prefix rule reaches the
+    # Authorizer and is answered by Go's "404 page not found" (text/plain),
+    # while an unrouted host on the same controller gets nginx's HTML 404. That
+    # difference announces that a JIT gate is mounted on a service configured to
+    # look like it is not there. With Exact paths the unknown path falls through
+    # to the gated rule and gets the controller's own error page instead.
     - host: app.example.com
       http:
         paths:
-          - path: /.well-known/jit-access/
-            pathType: Prefix
-            backend:
+          - path: /.well-known/jit-access/challenge
+            pathType: Exact
+            backend: &authorizer
               service:
                 name: jit-authorizer
                 port:
                   number: 8998
+          - path: /.well-known/jit-access/respond
+            pathType: Exact
+            backend: *authorizer
+          - path: /.well-known/jit-access/enroll
+            pathType: Exact
+            backend: *authorizer
+          - path: /.well-known/jit-access/register
+            pathType: Exact
+            backend: *authorizer
   tls:
     - hosts: [app.example.com]
       secretName: app-example-com-tls
