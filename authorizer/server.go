@@ -459,11 +459,22 @@ func (s *Server) authzDeny(w http.ResponseWriter, r *http.Request, c *reqCtx, re
 	if c != nil && c.known {
 		mode = s.config().failureMode(c.svc)
 	}
-	if mode != FailStealth {
-		w.Header().Set("X-JIT-Access", JITMarker)
-	}
 	w.Header().Set("Cache-Control", "no-store")
+	if mode == FailStealth {
+		// No marker and no body: the recipes read the marker's absence as
+		// "stealth" and answer the client with their own generic 404, which is
+		// what has to be indistinguishable from an unrouted path.
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+	// The interstitial page is served FROM here. The nginx recipes re-proxy a
+	// denial to /authz and render this body to the client, so dropping it left
+	// interstitial deployments serving an empty 403 — invisible to the lab,
+	// which only checks the marker on that path.
+	w.Header().Set("X-JIT-Access", JITMarker)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write(interstitialHTML)
 }
 
 func (s *Server) handleAuthz(w http.ResponseWriter, r *http.Request) {

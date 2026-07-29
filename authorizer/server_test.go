@@ -161,6 +161,35 @@ func TestInterstitialCarriesMarkerAndStealthDoesNot(t *testing.T) {
 	}
 }
 
+// The nginx recipes re-proxy a denial to /authz and render THAT body to the
+// client, so the interstitial page has to come back from the subrequest. When
+// /authz was changed to always deny with 403 the body was dropped with it, and
+// interstitial deployments served an empty 403. The lab could not see it: it
+// only checks that the marker is present on that path.
+func TestAuthzInterstitialStillCarriesThePage(t *testing.T) {
+	s := testServer(t, nil) // svcA defaults to interstitial
+	w := authz(s, svcA, proxyIP, "/", nil)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("got %d want 403", w.Code)
+	}
+	if w.Body.Len() == 0 {
+		t.Error("interstitial /authz returned no body — the recipes render this to the client")
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("interstitial content-type %q, want text/html", ct)
+	}
+
+	// Stealth is the opposite: no marker and no body, so the recipe answers with
+	// its own generic 404 instead.
+	st := testServer(t, func(c *Config) {
+		c.Services[svcA] = ServiceConfig{Tokens: []string{testKid}, FailureMode: FailStealth}
+	})
+	sw := authz(st, svcA, proxyIP, "/", nil)
+	if sw.Body.Len() != 0 {
+		t.Errorf("stealth /authz returned a body (%d bytes) — it would be rendered to the client", sw.Body.Len())
+	}
+}
+
 // Every forward-auth denial must be a status nginx's auth_request understands.
 // Anything else becomes a 500 at the edge, which is both an outage and a louder
 // signal than the interstitial it was trying to avoid.
