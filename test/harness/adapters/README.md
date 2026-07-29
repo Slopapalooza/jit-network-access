@@ -61,7 +61,7 @@ Running the adapters for real found three defects that reading the code did not:
    address, carrying the real origin only in `X-Original-URL` — which the
    Authorizer did not read, so every request resolved to an unconfigured service
    name and was denied. Fixed by putting the protocol Ingress in the Authorizer's
-   own namespace and by honouring `X-Original-URL` (with a regression test).
+   own namespace and by honoring `X-Original-URL` (with a regression test).
 
 ## Notes
 

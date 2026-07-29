@@ -134,7 +134,7 @@ def manual_grant(api, token, service, ip, ttl=120):
     The caller MUST check this. Several probes work by granting a victim IP and
     then showing a spoofed request cannot inherit it — if the grant silently
     never happened (no --api, wrong token, unreachable API) the assertion holds
-    trivially and a gate that fully honours X-Forwarded-For scores a PASS.
+    trivially and a gate that fully honors X-Forwarded-For scores a PASS.
     """
     if not api or not token:
         return False

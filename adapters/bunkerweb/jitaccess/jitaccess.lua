@@ -493,7 +493,7 @@ function jitaccess:api()
     local ttl = tonumber(body.ttl) or 3600
     if not service or not ip then return self:ret(true, "service and valid ip required", ngx.HTTP_BAD_REQUEST) end
     -- A manual grant has no browser to bind to, so an ip+cookie record would be
-    -- one is_allowed can never honour — while the API cheerfully reported
+    -- one is_allowed can never honor — while the API cheerfully reported
     -- granted: true. Force ip binding rather than minting a dead record.
     if body.binding == "ip+cookie" then
       return self:ret(true, cjson.encode({ error = "binding ip+cookie is not valid for a manual grant" }),

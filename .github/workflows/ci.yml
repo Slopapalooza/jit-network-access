@@ -28,7 +28,7 @@ permissions:
   contents: read
 
 env:
-  # Honour the `toolchain` directive in each go.mod rather than whatever the
+  # Honor the `toolchain` directive in each go.mod rather than whatever the
   # runner ships. That directive is the whole point of this file.
   GOTOOLCHAIN: auto
 

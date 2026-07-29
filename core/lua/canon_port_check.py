@@ -11,12 +11,12 @@ of its OWN shipped vectors, and nothing on the dev host noticed.
 This port is a stand-in for that missing runtime: same order of checks, same
 string operations, so a divergence here means a divergence there. It is NOT a
 replacement for running test_vectors.lua under real Lua — string semantics,
-integer/float behaviour and the `bit` library are not modelled — but it catches
+integer/float behavior and the `bit` library are not modeled — but it catches
 the logic errors, which is where the failures have actually come from.
 
 Keep it in step with canon.lua when either changes.
 
-canon_server_name is modelled at the BYTE level on purpose: Lua strings are
+canon_server_name is modeled at the BYTE level on purpose: Lua strings are
 byte strings, %s and %d are ASCII-only, and string.lower() is C tolower() in
 the C locale. Python's str equivalents are all Unicode-aware, so a str-level
 port would hide exactly the divergences it exists to find.

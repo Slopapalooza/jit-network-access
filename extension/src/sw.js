@@ -90,7 +90,7 @@ async function knock(origin) {
 // the first commit: clearing at first commit meant one extra hop defeated the
 // whole control (open a blank page, then navigate it to the enrolled origin).
 // Entries also expire on their own, so a tab whose first navigation never
-// commits — a cancelled or failed load — cannot silently suppress that tab's
+// commits — a canceled or failed load — cannot silently suppress that tab's
 // knocks forever.
 const pageOpened = new Map(); // tabId -> timestamp
 const PAGE_OPENED_TTL_MS = 5 * 60_000;

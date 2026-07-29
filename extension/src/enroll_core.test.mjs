@@ -139,7 +139,7 @@ await t("a server that WIDENS the consented origin set is rejected", async () =>
       JSON.stringify(removedOrigins));
 });
 
-await t("a server that NARROWS the consented set is honoured", async () => {
+await t("a server that NARROWS the consented set is honored", async () => {
   tokenStore = [];
   permissionsGranted = true;
   lastResponse = mkResponse({
@@ -163,7 +163,7 @@ await t("a server that NARROWS the consented set is honoured", async () => {
   assert.ok(!/not asked about/i.test(msg), "narrowing must not be treated as widening");
   // The point of the case: the NARROWED set is what gets enrolled. Asserting
   // only "did not throw the widening error" passed even if the full consented
-  // set was enrolled, which is the opposite of honouring the server's narrowing.
+  // set was enrolled, which is the opposite of honoring the server's narrowing.
   assert.ok(result, "narrowing should complete enrollment, got error: " + msg);
   assert.deepStrictEqual(result.origins, ["https://a.example.com"],
     "only the origin the server kept should be enrolled");

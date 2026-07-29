@@ -650,7 +650,7 @@ func mustClientIP(t *testing.T, s *Server, remoteAddr string) string {
 }
 
 // ingress-nginx sends its auth subrequest with Host set to the AUTH service's
-// address and the real origin only inside X-Original-URL. Without honouring
+// address and the real origin only inside X-Original-URL. Without honoring
 // that header every Kubernetes deployment resolves to the wrong service name
 // and denies everything — found by running the real thing under kind.
 func TestIngressNginxOriginalURL(t *testing.T) {
@@ -670,10 +670,10 @@ func TestIngressNginxOriginalURL(t *testing.T) {
 	// the knock above came from the proxy peer with no XFF, so key on the same
 	r.Header.Del("X-Forwarded-For")
 	if w := do(s, r); w.Code != http.StatusNoContent {
-		t.Errorf("ingress-nginx style authz: got %d want 204 (X-Original-URL not honoured?)", w.Code)
+		t.Errorf("ingress-nginx style authz: got %d want 204 (X-Original-URL not honored?)", w.Code)
 	}
 
-	// and the protocol endpoints must still be recognised through X-Original-URL
+	// and the protocol endpoints must still be recognized through X-Original-URL
 	r2 := req(http.MethodGet, "jit-authorizer.jit-system.svc.cluster.local", "/authz", proxyIP, map[string]string{
 		"X-Original-URL": "https://" + svcA + s.config().URIPrefix + "/challenge",
 	}, nil)
