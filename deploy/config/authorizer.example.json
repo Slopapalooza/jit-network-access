@@ -1,0 +1,27 @@
+{
+  "listen": "127.0.0.1:8998",
+
+  "admin_token": "CHANGE-ME-OR-REMOVE",
+
+  "trusted_proxies": ["127.0.0.1/32", "::1/128"],
+
+  "grant_ttl": 3600,
+  "nonce_ttl": 60,
+  "rate_limit_per_min": 10,
+
+  "services": {
+    "app.example.com": {
+      "tokens": ["kid_REPLACE_ME"],
+      "failure_mode": "interstitial",
+      "binding": "ip"
+    }
+  },
+
+  "tokens": [
+    {
+      "kid": "kid_REPLACE_ME",
+      "secret": "REPLACE-WITH-BASE64URL-OF-32-RANDOM-BYTES",
+      "label": "example device"
+    }
+  ]
+}
