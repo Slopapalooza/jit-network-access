@@ -62,9 +62,14 @@ import (
 // on each side, so it is not tuned to one machine.
 
 const (
-	timingPasses  = 5   // independent estimates; reduced by median
-	timingRounds  = 80  // paired rounds per pass
-	timingBatch   = 200 // calls per timed sample, to clear the clock granularity
+	timingPasses = 5  // independent estimates; reduced by median
+	timingRounds = 40 // paired rounds per pass
+	// 1000, not 200. Validated on an idle machine where a call costs ~7us: at
+	// 200 the samples were only ~1.4ms and per-batch noise left the passes
+	// disagreeing by 6.4%, so the run skipped itself. At 1000 the same machine
+	// reports 0.5-1.5% with the passes agreeing to ~1%, and still sees the
+	// removed-equalization mutation at 11.5%.
+	timingBatch   = 1000
 	timingWarmups = 3
 
 	timingOracleBudgetPct = 3.0
