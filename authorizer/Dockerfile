@@ -5,13 +5,20 @@
 #
 # Context is the REPO ROOT, because the module needs ../core/go.
 
-FROM golang:1.24-alpine AS build
+# Matches the `toolchain` directive in authorizer/go.mod. It used to say 1.24,
+# which is the `go` directive — the older of the two — so this image built
+# against a different stdlib than CI tested and than govulncheck cleared. Keep
+# these in step: the toolchain line is the one that decides.
+FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY core/go/ ./core/go/
 COPY authorizer/ ./authorizer/
 WORKDIR /src/authorizer
+# version is injected so `-version` and the startup log say something truthful
+# in a container; it defaults to the value in main.go otherwise.
+ARG VERSION=dev
 # Static, no cgo — the result runs on scratch/distroless.
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/jitaccess-authorizer .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/jitaccess-authorizer .
 
 # distroless: no shell, no package manager, nothing to pivot to if the process
 # is ever compromised. The Authorizer needs no filesystem beyond its config.

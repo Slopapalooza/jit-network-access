@@ -4,8 +4,9 @@ The Authorizer is one static binary with no runtime dependencies — no database
 no Redis, no shared state. This directory installs it as a systemd service.
 
 ```bash
-curl -fsSLO https://github.com/Slopapalooza/jit-network-access/releases/latest/download/deploy.tar.gz
-tar xzf deploy.tar.gz && cd deploy
+VER=$(curl -fsSL https://api.github.com/repos/Slopapalooza/jit-network-access/releases/latest | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+curl -fsSLO "https://github.com/Slopapalooza/jit-network-access/releases/download/$VER/jitaccess-deploy-$VER.tar.gz"
+tar xzf "jitaccess-deploy-$VER.tar.gz" && cd deploy
 sudo ./debian/install.sh
 ```
 

@@ -55,3 +55,6 @@ authorizer/*.exe
 authorizer/config.json
 adapters/caddy/caddy-jit
 adapters/caddy/cmd/caddy-jit/caddy-jit
+
+# Release artifacts (built by scripts/build-release.sh, attached to a release)
+dist/

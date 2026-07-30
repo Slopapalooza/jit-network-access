@@ -24,5 +24,10 @@ done
 
 out="$repo/adapters/bunkerweb/jitaccess.tar.gz"
 echo "packaging -> $out"
-tar -C "$here" -czf "$out" jitaccess
+# Exclude __pycache__: running any of the plugin's Python locally (bwcli, the
+# registry job, the UI actions) leaves .pyc files beside it, and tarring the
+# directory shipped this developer's bytecode — compiled by whatever CPython
+# happened to be installed — into the plugin BunkerWeb unpacks and runs. Caught
+# when the release tarball turned out to contain token.cpython-314.pyc.
+tar -C "$here" --exclude='__pycache__' --exclude='*.pyc' -czf "$out" jitaccess
 echo "done. install by mounting into /data/plugins or via EXTERNAL_PLUGIN_URLS=file://$out"
