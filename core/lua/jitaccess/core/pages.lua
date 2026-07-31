@@ -14,7 +14,13 @@ local _M = { _VERSION = "0.1.0" }
 
 -- Where a browser without the extension is sent to get it. Forks and air-gapped
 -- sites that mirror the artifact internally change this in one place.
-_M.EXTENSION_RELEASES_URL = "https://github.com/Slopapalooza/jit-network-access/releases"
+--
+-- The Chrome Web Store listing, not the releases page: a one-click install from
+-- a reviewed listing is easier and more trustworthy than talking a user through
+-- Developer mode and Load unpacked. The signed .crx on the releases page stays
+-- the route for managed force-install policy; its extension ID differs, because
+-- the store re-signs with its own key.
+_M.EXTENSION_INSTALL_URL = "https://chromewebstore.google.com/detail/jit-network-access/chkllfmckdloagomooelboobmoednkai"
 
 -- The registration landing page.
 --
@@ -57,12 +63,10 @@ _M.REGISTER_HTML = [[<!doctype html>
     <p>This is an enrollment link, but the extension is not installed in this
        browser &mdash; so there is nothing here to receive it yet.</p>
     <ol>
-      <li>Download the latest <code>jit-access-&lt;version&gt;.zip</code> from the releases page and unzip it.</li>
-      <li>Open <code>chrome://extensions</code> and turn on <b>Developer mode</b>.</li>
-      <li>Choose <b>Load unpacked</b> and select the unzipped folder.</li>
+      <li>Install <b>JIT Network Access</b> from the Chrome Web Store.</li>
       <li>Come back and open this enrollment link again.</li>
     </ol>
-    <a class="btn" href="]] .. _M.EXTENSION_RELEASES_URL .. [[" rel="noopener noreferrer">Get the extension</a>
+    <a class="btn" href="]] .. _M.EXTENSION_INSTALL_URL .. [[" rel="noopener noreferrer">Get the extension</a>
     <p>Already installed? Make sure it is enabled, then reload this page. The
        extension takes over enrollment links automatically.</p>
   </div>

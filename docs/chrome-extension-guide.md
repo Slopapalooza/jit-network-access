@@ -19,14 +19,25 @@ explains it better than a page of prose.
 
 ## Install
 
-The extension is a Chromium MV3 extension (Chrome, Edge, Brave, …). Until it's on
-a store, load it unpacked:
+The extension is a Chromium MV3 extension (Chrome, Edge, Brave, …). Install it
+from the Chrome Web Store:
+
+**[JIT Network Access](https://chromewebstore.google.com/detail/jit-network-access/chkllfmckdloagomooelboobmoednkai)**
+
+Pin it to the toolbar so the status popup is one click away.
+
+<details>
+<summary>Loading it unpacked instead (development, forks, air-gapped sites)</summary>
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode** (top‑right).
 3. Click **Load unpacked** and select the `extension/` folder.
 
-Pin it to the toolbar so the status popup is one click away.
+An unpacked or self-signed build gets a **different extension ID** from the
+store copy, because the store re-signs with its own key. That matters for
+managed force-install policy, which pins an ID — decide which one you are
+deploying and be consistent.
+</details>
 
 ---
 
