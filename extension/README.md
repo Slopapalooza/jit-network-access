@@ -4,9 +4,16 @@ The browser client. When you navigate to an enrolled protected origin, the
 service worker silently performs the challenge/respond **knock**, so the site
 opens transparently — no visible login, no manual step.
 
+Published at
+**[JIT Network Access on the Chrome Web Store](https://chromewebstore.google.com/detail/jit-network-access/chkllfmckdloagomooelboobmoednkai)**
+(extension ID `chkllfmckdloagomooelboobmoednkai`). This directory is the source
+it is built from; a locally-built or self-signed copy gets a different ID,
+because the store re-signs with its own key.
+
 ## Load it
 
-1. `chrome://extensions` → enable **Developer mode** → **Load unpacked** → select this `extension/` folder.
+1. Install from the store link above — or, for development, `chrome://extensions`
+   → enable **Developer mode** → **Load unpacked** → select this `extension/` folder.
 2. **Enroll** — one of three ways (all import the secret as a **non-extractable** WebCrypto key and ask for permission only to the named origins):
 
    - **Registration URL (easiest — nothing to copy).** Your admin hands you a link like

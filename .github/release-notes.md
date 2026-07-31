@@ -54,4 +54,6 @@ The wire protocol carries its own version field (`"v":1`), independent of these
 release numbers, so a future protocol revision does not invalidate a deployment
 running this one.
 
-The browser extension is versioned and released separately.
+The browser extension is versioned and released separately, and is published
+on the Chrome Web Store:
+[JIT Network Access](https://chromewebstore.google.com/detail/jit-network-access/chkllfmckdloagomooelboobmoednkai).

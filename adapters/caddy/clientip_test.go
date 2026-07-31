@@ -257,7 +257,7 @@ func TestRegisterLandingPage(t *testing.T) {
 		t.Fatalf("register page while dark: got %d want 200", w.Code)
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, jitcore.ExtensionReleasesURL) {
+	if !strings.Contains(body, jitcore.ExtensionInstallURL) {
 		t.Error("register page must link to the releases page")
 	}
 	if strings.Contains(body, "abc123") {

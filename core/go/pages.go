@@ -10,10 +10,17 @@ package jitcore
 // step by hand across engines is exactly the drift the shared vectors exist to
 // prevent for the crypto.
 
-// ExtensionReleasesURL is where a browser without the extension is sent to get
+// ExtensionInstallURL is where a browser without the extension is sent to get
 // it. Forks and air-gapped sites that mirror the artifact internally should
 // change this in one place.
-const ExtensionReleasesURL = "https://github.com/Slopapalooza/jit-network-access/releases"
+//
+// The Chrome Web Store listing, not the releases page: a one-click install from
+// a reviewed listing is both easier and more trustworthy than talking a user
+// through Developer mode and Load unpacked, which is a habit worth not
+// teaching. The signed .crx on the releases page remains the route for managed
+// force-install policy and for anyone who cannot reach the store — note its
+// extension ID differs, because the store re-signs with its own key.
+const ExtensionInstallURL = "https://chromewebstore.google.com/detail/jit-network-access/chkllfmckdloagomooelboobmoednkai"
 
 // RegisterHTML is the registration landing page.
 //
@@ -56,12 +63,10 @@ var RegisterHTML = []byte(`<!doctype html>
     <p>This is an enrollment link, but the extension is not installed in this
        browser — so there is nothing here to receive it yet.</p>
     <ol>
-      <li>Download the latest <code>jit-access-&lt;version&gt;.zip</code> from the releases page and unzip it.</li>
-      <li>Open <code>chrome://extensions</code> and turn on <b>Developer mode</b>.</li>
-      <li>Choose <b>Load unpacked</b> and select the unzipped folder.</li>
+      <li>Install <b>JIT Network Access</b> from the Chrome Web Store.</li>
       <li>Come back and open this enrollment link again.</li>
     </ol>
-    <a class="btn" href="` + ExtensionReleasesURL + `" rel="noopener noreferrer">Get the extension</a>
+    <a class="btn" href="` + ExtensionInstallURL + `" rel="noopener noreferrer">Get the extension</a>
     <p>Already installed? Make sure it is enabled, then reload this page. The
        extension takes over enrollment links automatically.</p>
   </div>
