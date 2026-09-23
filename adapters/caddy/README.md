@@ -40,9 +40,13 @@ app.example.com {
 That's the whole Simple setup: no Redis, no database, no sidecar. See
 [`Caddyfile.example`](Caddyfile.example) for every option.
 
-`jit_access` registers itself to run **before** `basic_auth`, so the site is dark
-before any inner authentication is attempted — and your existing auth still runs
-behind a valid grant. No `order` global option is needed.
+`jit_access` registers itself to run **before** `redir`, which in Caddy's
+directive order also puts it ahead of `rewrite`, `uri`, `try_files` and every
+authentication handler (`basic_auth`, `forward_auth`). So the site is dark before
+a redirect can answer, before an SPA-style `try_files` can rewrite the knock
+endpoints away, and before any inner authentication is attempted — and your
+existing auth still runs behind a valid grant. No `order` global option is
+needed.
 
 ## Options
 

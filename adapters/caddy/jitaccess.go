@@ -48,11 +48,18 @@ const (
 func init() {
 	caddy.RegisterModule(JITAccess{})
 	httpcaddyfile.RegisterHandlerDirective("jit_access", parseCaddyfile)
-	// The gate runs before any authentication handler: the service is dark
-	// before inner auth is even attempted, and inner auth (basic_auth,
-	// forward_auth, an SSO proxy) still applies behind a valid grant. Declaring
-	// the order here means users do not need an `order` global option.
-	httpcaddyfile.RegisterDirectiveOrder("jit_access", httpcaddyfile.Before, "basic_auth")
+	// The gate runs before anything that can answer or reshape a request:
+	// before `redir` and therefore before `rewrite`, `uri` and `try_files`,
+	// which Caddy orders between `redir` and `basic_auth`. It was registered
+	// before `basic_auth` alone, and that placed it AFTER those four, so a
+	// `redir /old /new` answered 302 through a dark site, and the standard SPA
+	// block (`try_files {path} /index.html`) rewrote the challenge path to
+	// /index.html before the gate saw it, so the challenge answered 403 and
+	// enrolled devices could never knock. Being ahead of `redir` keeps it ahead
+	// of every auth handler too: inner auth (basic_auth, forward_auth, an SSO
+	// proxy) still applies behind a valid grant. Declaring the order here means
+	// users do not need an `order` global option.
+	httpcaddyfile.RegisterDirectiveOrder("jit_access", httpcaddyfile.Before, "redir")
 }
 
 // Process-wide state. Kept outside the handler instance so a Caddy config
