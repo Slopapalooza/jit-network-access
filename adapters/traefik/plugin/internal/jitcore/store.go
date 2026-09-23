@@ -37,6 +37,11 @@ type Grant struct {
 	Issued     int64  `json:"issued"`
 	Exp        int64  `json:"exp"`
 	Manual     bool   `json:"manual,omitempty"` // admin break-glass: skips the registry re-check
+	// SecretFP is Token.Fingerprint() of the secret that verified the knock,
+	// re-checked by IsAllowed so an in-place secret rotation evicts the grant.
+	// Never serialized: the admin listing has no use for it, and for an
+	// operator-chosen (weak) secret a hash is a crackable hint.
+	SecretFP string `json:"-"`
 }
 
 // CookieHash is what we persist for ip+cookie binding — never the cookie value
@@ -120,9 +125,10 @@ func (s *GrantStore) Put(g *Grant, oldCookieHash ...string) {
 }
 
 // IsAllowed is the request-path check. Per SPEC §4.3 it re-validates on EVERY
-// call that the grant's kid is still registered and unexpired, so revoking a
-// token or letting it expire evicts live grants immediately rather than at TTL
-// (SECURITY-REVIEW H3). For ip+cookie it also verifies the presented cookie.
+// call that the grant's kid is still registered, unexpired, on the service's
+// allow-list and holding the same secret, so revoking a token, letting it
+// expire or rotating its secret evicts live grants immediately rather than at
+// TTL (SECURITY-REVIEW H3). For ip+cookie it also verifies the presented cookie.
 //
 // cookie is the raw grant-id cookie value ("" when absent). Returns nil = deny.
 func (s *GrantStore) IsAllowed(serviceCanon, ipCanon string, reg *Registry, now int64, cookie string) *Grant {
@@ -166,6 +172,14 @@ func (s *GrantStore) IsAllowed(serviceCanon, ipCanon string, reg *Registry, now 
 		// immediately, so the two admin actions behaved differently for no
 		// visible reason.
 		if !reg.AllowedForService(g.Kid, serviceCanon) {
+			return nil
+		}
+		// And bound to the SECRET that verified the knock, not just the kid. A
+		// secret regenerated in place keeps the kid, so without this the old
+		// device kept its grant for the whole TTL after the admin was told it
+		// was locked out. A record with no fingerprint (a mint site that did not
+		// set one) fails the same way: closed.
+		if subtle.ConstantTimeCompare([]byte(g.SecretFP), []byte(t.Fingerprint())) != 1 {
 			return nil
 		}
 	}

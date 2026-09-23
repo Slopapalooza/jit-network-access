@@ -307,7 +307,9 @@ local function respond(sname, ip, svc)
       "; Path=/; Max-Age=" .. tostring(ttl) .. "; Secure; HttpOnly; SameSite=Strict"
   end
 
-  local rec = cstore.record(sname, ip, kid, ttl, { binding = svc.binding, cookie_hash = ch })
+  local rec = cstore.record(sname, ip, kid, ttl, { binding = svc.binding, cookie_hash = ch,
+                                                   -- so an in-place secret rotation evicts it
+                                                   secret_fp = cregistry.fingerprint(token) })
   if store:put_grant(sname, ip, rec, ttl) ~= true then return deny(svc) end
 
   ngx.header["Cache-Control"] = "no-store"

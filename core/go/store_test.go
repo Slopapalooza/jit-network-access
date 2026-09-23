@@ -26,7 +26,8 @@ func testRegistry() *Registry {
 
 func liveGrant(kid string) *Grant {
 	return &Grant{V: 1, Kid: kid, Service: "app.example.com", IP: "1.2.3.4",
-		Binding: BindingIP, Issued: now, Exp: now + 3600}
+		Binding: BindingIP, Issued: now, Exp: now + 3600,
+		SecretFP: testRegistry().Lookup(kid).Fingerprint()}
 }
 
 func TestGrantHappyPathAndExpiry(t *testing.T) {
@@ -44,6 +45,44 @@ func TestGrantHappyPathAndExpiry(t *testing.T) {
 	}
 	if g := s.IsAllowed("other.example.com", "1.2.3.4", reg, now, ""); g != nil {
 		t.Error("grant must not apply to another service")
+	}
+}
+
+// Regenerating a token's secret IN PLACE (same kid, new bytes) must evict its
+// live grants on the next request, exactly like deleting the kid does. The
+// re-check used to stop at "kid still registered", so the old device kept
+// access for the full grant TTL — and could re-knock with the old secret in the
+// window before the new registry loaded, minting a grant that outlived the
+// rotation while the admin console reported the device locked out.
+func TestGrantRechecksSecretFingerprintEveryCall(t *testing.T) {
+	s, reg := NewGrantStore(), testRegistry()
+	s.Put(liveGrant("kid_ok"))
+	if s.IsAllowed("app.example.com", "1.2.3.4", reg, now, "") == nil {
+		t.Fatal("precondition: grant should be live")
+	}
+
+	// admin regenerates the secret; kid, label and allow-lists are unchanged
+	reg.Tokens["kid_ok"].Secret = []byte("fedcba9876543210")
+	if s.IsAllowed("app.example.com", "1.2.3.4", reg, now, "") != nil {
+		t.Error("grant minted under the previous secret must be denied after rotation")
+	}
+
+	// a record with no fingerprint at all (a mint site that forgot to set it)
+	// fails closed rather than skipping the check
+	reg = testRegistry()
+	g := liveGrant("kid_ok")
+	g.SecretFP = ""
+	s.Put(g)
+	if s.IsAllowed("app.example.com", "1.2.3.4", reg, now, "") != nil {
+		t.Error("grant without a secret fingerprint must be denied")
+	}
+
+	// break-glass grants have no secret behind them and are unaffected
+	m := liveGrant("__manual__")
+	m.Manual, m.SecretFP = true, ""
+	s.Put(m)
+	if s.IsAllowed("app.example.com", "1.2.3.4", reg, now, "") == nil {
+		t.Error("manual grant must not require a fingerprint")
 	}
 }
 
@@ -102,6 +141,7 @@ func TestSiteScopedRegistryStillAdmits(t *testing.T) {
 		map[string]map[string]bool{"*": {"kid_site": true}},
 	)
 	g := liveGrant("kid_site")
+	g.SecretFP = reg.Lookup("kid_site").Fingerprint() // minted under THIS registry's secret
 	s.Put(g)
 	if s.IsAllowed("app.example.com", "1.2.3.4", reg, now, "") == nil {
 		t.Fatal("site-scoped registry: a granted kid must still be admitted")

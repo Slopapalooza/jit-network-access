@@ -310,7 +310,9 @@ function jitaccess:verify_knock(sname, ip, body)
   end
 
   local rec = cstore.record(sname, ip, kid, ttl,
-                            { manual = false, binding = binding, cookie_hash = cookie_hash })
+                            { manual = false, binding = binding, cookie_hash = cookie_hash,
+                              -- so a Regenerate (same kid, new secret) evicts it
+                              secret_fp = cregistry.fingerprint(token) })
   return self.store:put_grant(sname, ip, rec, ttl) == true
 end
 

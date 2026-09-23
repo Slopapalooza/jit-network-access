@@ -13,6 +13,8 @@
 --   services[sname_canon]  = { ["*"] = true }  -- any registered kid
 --                          or { [kid] = true, ... }  -- explicit allow-list
 
+local sha256_hex = require("jitaccess.core.crypto").sha256_hex
+
 local _M = { _VERSION = "0.1.0" }
 local methods = {}
 local mt = { __index = methods }
@@ -33,6 +35,21 @@ end
 function methods:is_expired(token, now)
   if token == nil or token.expires == nil or token.expires == 0 then return false end
   return now >= token.expires
+end
+
+-- Which secret does this token hold? Lowercase-hex SHA-256 of the raw bytes:
+-- the same primitive as the cookie hash, and identical to Token.Fingerprint()
+-- in core/go/registry.go. A grant records the fingerprint of the secret that
+-- verified its knock and store:is_allowed re-checks it on every request, so
+-- regenerating a secret in place (same kid, new bytes) evicts the old device's
+-- grants exactly like deleting the kid does. Before this the re-check stopped
+-- at "kid still registered", so the old device kept its grant for the full
+-- grant TTL — and on BunkerWeb, where the new registry loads a minute after
+-- the config is saved, could re-knock with the old secret in that window and
+-- mint a grant that outlived the rotation. nil when there is no secret.
+function _M.fingerprint(token)
+  if type(token) ~= "table" or type(token.secret) ~= "string" then return nil end
+  return sha256_hex(token.secret)
 end
 
 -- Which key holds the allow-list for this service?

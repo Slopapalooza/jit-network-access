@@ -107,6 +107,10 @@ func (s *Server) adminGrant(w http.ResponseWriter, r *http.Request) {
 	g := &jitcore.Grant{
 		V: 1, Kid: kid, Service: service, IP: ip, Binding: jitcore.BindingIP,
 		Issued: now, Exp: now + ttl, Manual: manual,
+		// A kid-backed admin grant is re-checked like a knocked one, so it must
+		// carry the current secret's fingerprint; a break-glass grant has no kid
+		// behind it and Lookup yields "" (unused, since Manual skips the check).
+		SecretFP: s.registry().Lookup(kid).Fingerprint(),
 	}
 	s.grants.Put(g)
 	writeJSON(w, http.StatusOK, map[string]any{"granted": true, "service": service, "ip": ip, "exp": g.Exp})

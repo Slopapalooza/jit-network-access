@@ -3,7 +3,11 @@
 
 package jitcore
 
-import "errors"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+)
 
 // TokenRegistry (SPEC §3). Pure over its input: the adapter parses backend
 // config (BunkerWeb settings, Authorizer config file) into these maps and hands
@@ -46,6 +50,25 @@ func (r *Registry) Lookup(kid string) *Token {
 
 func (r *Registry) IsExpired(t *Token, now int64) bool {
 	return t != nil && t.Expires != 0 && now >= t.Expires
+}
+
+// Fingerprint names WHICH secret a token holds without holding it: the
+// lowercase-hex SHA-256 of the raw secret bytes. A grant records the
+// fingerprint of the secret that verified its knock, and IsAllowed compares it
+// against the registry's current one on every request, so regenerating a
+// secret in place (same kid, new bytes) evicts the old device's live grants
+// exactly like deleting the kid does. Before this the re-check stopped at "is
+// the kid still registered?", so a device holding the OLD secret kept its grant
+// for the full grant TTL — and on an engine whose registry reloads a minute
+// after the config is saved, could re-knock with the old secret in that window
+// and mint a fresh grant that outlived the rotation. Same primitive as
+// CookieHash, and identical to registry.fingerprint() in the Lua core.
+func (t *Token) Fingerprint() string {
+	if t == nil {
+		return ""
+	}
+	sum := sha256.Sum256(t.Secret)
+	return hex.EncodeToString(sum[:])
 }
 
 // allowKey resolves which key holds the allow-list for a service.

@@ -25,8 +25,9 @@ cd authorizer && go build -o jitaccess-authorizer .
 ```
 
 `SIGHUP` reloads the config (tokens and services) without dropping live grants;
-they are re-checked against the new registry on their next request, so removing
-a token evicts its grants immediately.
+they are re-checked against the new registry on their next request, including
+the secret they were minted under, so removing a token or giving it a new
+secret evicts its grants immediately.
 
 ## Two faces
 

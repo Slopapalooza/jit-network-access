@@ -80,11 +80,12 @@ The cookie component is **required** for `ip+cookie`: a two-part key holds exact
 ### 4.2 Value
 
 ```
-{ v:1, kid, service, ip, exp, binding:"ip"|"ip+cookie", cookie_hash?, issued }
+{ v:1, kid, service, ip, exp, binding:"ip"|"ip+cookie", cookie_hash?, issued, secret_fp }
 
 HARDENED (shared backend): add  mac = HMAC/AEAD(grant_sign_key, canonical(value))
 ```
 
+- `secret_fp` is the lowercase-hex SHA-256 of the raw secret that verified the knock (absent on a `manual` grant, which has no token behind it). `is_allowed` re-checks it (§4.3) so that regenerating a secret in place evicts the grants minted under the old one. It **MUST NOT** appear in `list()` output: the admin has no use for it, and for an operator-chosen secret a hash is a crackable hint.
 - **Simple/local backend:** the store is a `lua_shared_dict` (in-process, worker-shared) or an in-process TTL map. It is **process-private — no external party can write it** — so the value carries **no `mac`** and needs none. The grant-injection threat (SECURITY-REVIEW C3) does not exist without a shared writer.
 - **HARDENED/shared backend:** the value **MUST** carry `mac` and readers **MUST** verify it before honoring the grant, so a bare `SET jit:grant:… …` by any other Redis client is rejected. Plus Redis AUTH + ACL scoped to `jit:*` + TLS + tenant namespacing.
 
@@ -92,14 +93,14 @@ HARDENED (shared backend): add  mac = HMAC/AEAD(grant_sign_key, canonical(value)
 
 ```
 is_allowed(server_name, ip, [cookie]) -> grant | nil
-grant(server_name, ip, kid, ttl, binding, [cookie_hash]) -> ok
+grant(server_name, ip, kid, ttl, binding, [cookie_hash], secret_fp) -> ok
 revoke(server_name, ip) -> ok
 revoke_token(kid) -> count            # sweep every grant for kid via the bykid index
 list() -> [grant]                     # admin/API
 ```
 
 Normative:
-- `is_allowed` **MUST** re-check, on every call, that the grant's `kid` is still in the registry, that the token's `expires` has not passed, **and that the kid is still on the service's allow-list** — so a `revoke_token`, an expiry, or a de-authorization evicts within the cache window even if the record's TTL has not elapsed (SECURITY-REVIEW H3). Re-checking the allow-list matters because removing a kid from one service while leaving the token registered (it may still serve another) is a normal admin action; without it, that action silently did nothing until TTL while deleting the token evicted immediately. In `ip+cookie` binding it **MUST** also verify the presented cookie against `cookie_hash`.
+- `is_allowed` **MUST** re-check, on every call, that the grant's `kid` is still in the registry, that the token's `expires` has not passed, **that the kid is still on the service's allow-list, and that the registry's current secret for the kid has the fingerprint recorded in the grant** — so a `revoke_token`, an expiry, a de-authorization, or an in-place secret regeneration evicts within the cache window even if the record's TTL has not elapsed (SECURITY-REVIEW H3). Re-checking the allow-list matters because removing a kid from one service while leaving the token registered (it may still serve another) is a normal admin action; without it, that action silently did nothing until TTL while deleting the token evicted immediately. Re-checking the secret matters because regenerating one keeps the kid: without it, the old device held its grant for the full TTL, and on an engine whose registry loads later than its config is saved it could re-knock with the old secret in that window and mint a grant that outlived the rotation. A grant with no `secret_fp` **MUST** be denied, not exempted. In `ip+cookie` binding it **MUST** also verify the presented cookie against `cookie_hash`.
 - A registry may be **multi-service** (allow-lists keyed by canonical server name) or **site-scoped** (one allow-list under `"*"`, built per site block or router by an adapter that does not know its own hostnames). The allow-list check **MUST** resolve the key accordingly, so the same store logic serves both shapes.
 - `revoke(service, ip)` **MUST** remove every grant at that address — the `ip`-bound record and all device-bound ones — since an admin revoking an address means the address loses access, not one device at it. A partial revoke is worse than none, because it looks complete.
 - `revoke_token(kid)` **MUST** delete every grant carrying that kid (via the bykid index) and return the count (blast radius for the admin).

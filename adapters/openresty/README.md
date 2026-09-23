@@ -85,9 +85,10 @@ over TLS at `/enroll`.
 - **State is per worker process.** Grants and spent nonces live in the shared
   dicts, so they are shared across workers and survive a `reload`, but a full
   **restart** clears them and clients transparently re-knock.
-- **Revoking a device:** remove its `token` entry and reload. Grants are
-  re-checked against the registry on every request, so the device is evicted on
-  its next request rather than at TTL.
+- **Revoking a device:** remove its `token` entry, or give the kid a new secret,
+  and reload. Grants are re-checked against the registry on every request,
+  including the secret they were minted under, so the removed or rotated device
+  is evicted on its next request rather than at TTL.
 - **Fail-closed:** the whole access path is wrapped in `pcall`, so any thrown
   error denies. A `pcall` cannot see a clean early return, so the "`init()`
   never ran" case — a missing or mistyped `init_by_lua_block` include — is

@@ -451,6 +451,7 @@ func (j *JITAccess) handleRespond(w http.ResponseWriter, r *http.Request, servic
 	g := &jitcore.Grant{
 		V: 1, Kid: body.Kid, Service: service, IP: ip,
 		Binding: j.Binding, Issued: n, Exp: n + ttl,
+		SecretFP: token.Fingerprint(), // so an in-place secret rotation evicts it
 	}
 	if j.Binding == jitcore.BindingIPCookie {
 		idBytes, err := jitcore.RandomBytes(32)

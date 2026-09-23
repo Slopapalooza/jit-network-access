@@ -315,6 +315,7 @@ func (s *Server) handleRespond(w http.ResponseWriter, r *http.Request) {
 	g := &jitcore.Grant{
 		V: 1, Kid: body.Kid, Service: c.service, IP: c.ip,
 		Binding: cfg.binding(c.svc), Issued: now, Exp: now + ttl,
+		SecretFP: token.Fingerprint(), // so an in-place secret rotation evicts it
 	}
 	// ip+cookie binding: mint an opaque grant id, store only its hash, and set
 	// it host-only + SameSite=Strict so a cross-site navigation cannot ride it

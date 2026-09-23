@@ -553,6 +553,48 @@ func TestReloadDroppingTokenEvictsGrant(t *testing.T) {
 	}
 }
 
+// Regenerating a token's secret IN PLACE (same kid, new bytes) must evict its
+// live grants on the next request too. The re-check used to stop at "kid still
+// registered", so the old device kept access for the full grant TTL after the
+// admin had rotated it out — and, on an engine whose registry loads later than
+// the config is saved, could re-knock with the old secret in that window and
+// mint a grant that outlived the rotation.
+func TestReloadRotatingSecretEvictsGrant(t *testing.T) {
+	s := testServer(t, nil)
+	if w := knock(t, s, svcA, proxyIP, nil, testKid, secretBytes(t)); w.Code != http.StatusNoContent {
+		t.Fatalf("knock: %d", w.Code)
+	}
+	if got := authz(s, svcA, proxyIP, "/", nil); got.Code != http.StatusNoContent {
+		t.Fatalf("precondition: grant should be live, got %d", got.Code)
+	}
+
+	rotated := bytes.Repeat([]byte{0x5a}, 32) // same kid, new secret
+	nc := DefaultConfig()
+	nc.AdminToken = "admin-secret"
+	nc.Tokens = []TokenConfig{{Kid: testKid, Secret: jitcore.B64u(rotated), Label: "test"}}
+	nc.Services = map[string]ServiceConfig{svcA: {Tokens: []string{testKid}}}
+	if err := nc.finalize(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reload(nc); err != nil {
+		t.Fatal(err)
+	}
+	if got := authz(s, svcA, proxyIP, "/", nil); got.Code == http.StatusNoContent {
+		t.Error("SECURITY: grant minted under the old secret survived an in-place rotation")
+	}
+
+	// The old secret can no longer knock; the new one knocks its way back in.
+	if w := knock(t, s, svcA, proxyIP, nil, testKid, secretBytes(t)); w.Code == http.StatusNoContent {
+		t.Error("SECURITY: the retired secret still knocks")
+	}
+	if w := knock(t, s, svcA, proxyIP, nil, testKid, rotated); w.Code != http.StatusNoContent {
+		t.Fatalf("knock with the rotated secret: %d", w.Code)
+	}
+	if got := authz(s, svcA, proxyIP, "/", nil); got.Code != http.StatusNoContent {
+		t.Errorf("grant under the new secret should be live, got %d", got.Code)
+	}
+}
+
 // An unconfigured service is denied rather than passed through: opting in is
 // explicit, and the fail direction is closed.
 func TestUnknownServiceDenied(t *testing.T) {
@@ -937,7 +979,8 @@ func TestSweepersReclaim(t *testing.T) {
 
 	// Grants, spent nonces and enrollment codes.
 	s.grants.Put(&jitcore.Grant{V: 1, Kid: testKid, Service: svcA, IP: "1.2.3.4",
-		Binding: jitcore.BindingIP, Issued: now, Exp: now + 10})
+		Binding: jitcore.BindingIP, Issued: now, Exp: now + 10,
+		SecretFP: s.registry().Lookup(testKid).Fingerprint()})
 	s.nonces.Claim("some-nonce", now, 10)
 	s.codes.Put("some-code", &jitcore.EnrollCode{Kid: testKid, Exp: now + 10})
 

@@ -30,6 +30,7 @@ local NONCE_PREFIX = "jit:nonce:"
 -- bor/bxor accumulator and Go's subtle.ConstantTimeCompare. Two implementations
 -- of one primitive is exactly how that drift happens.
 local ct_equal = require("jitaccess.core.crypto").ct_equal
+local fingerprint = require("jitaccess.core.registry").fingerprint
 
 -- opts.grants  : ngx.shared dict for grants        (required, Simple)
 -- opts.nonces  : ngx.shared dict for spent nonces  (required, Simple) — MUST be
@@ -107,9 +108,10 @@ function methods:get_grant(sname_canon, ip_canon, cookie_hash)
 end
 
 -- SPEC §4.3 is_allowed: grant present AND kid still registered AND token not
--- expired AND (ip+cookie) cookie matches. registry is duck-typed (has :lookup,
--- :is_expired). Any failure -> nil (deny). This is the function the adapter's
--- access phase calls.
+-- expired AND kid still allow-listed AND token holds the secret the grant was
+-- minted under AND (ip+cookie) cookie matches. registry is duck-typed (has
+-- :lookup, :is_expired, :allowed_for_service; tokens carry .secret). Any
+-- failure -> nil (deny). This is the function the adapter's access phase calls.
 --
 -- Break-glass carve-out: a grant created directly by an admin over the
 -- authenticated internal API (rec.manual == true) skips the registry re-check,
@@ -140,6 +142,15 @@ function methods:is_allowed(sname_canon, ip_canon, registry, now, cookie_hash_pr
     -- token evicted it at once — two admin actions that look equivalent from
     -- the console behaving differently.
     if not registry:allowed_for_service(rec.kid, sname_canon) then return nil end
+    -- And bound to the SECRET that verified the knock, not just the kid. A
+    -- secret regenerated in place keeps the kid, so without this the old
+    -- device kept its grant for the whole TTL after the admin was told it was
+    -- locked out. A record with no fingerprint (minted before this field
+    -- existed and still sitting in the shared dict across a reload, or by a
+    -- caller that did not set one) fails the same way: closed. That device
+    -- simply re-knocks once.
+    local fp = fingerprint(token)
+    if type(rec.secret_fp) ~= "string" or not fp or not ct_equal(rec.secret_fp, fp) then return nil end
   end
   if rec.binding == "ip+cookie" then
     -- The grant is additionally bound to the browser that knocked: the client
@@ -152,7 +163,10 @@ function methods:is_allowed(sname_canon, ip_canon, registry, now, cookie_hash_pr
   return rec
 end
 
--- Build a grant record. `opts` = { kid, binding, cookie_hash, manual, now }.
+-- Build a grant record.
+-- `opts` = { binding, cookie_hash, manual, now, secret_fp }. secret_fp is
+-- registry.fingerprint(token) for the token that verified the knock; every
+-- non-manual record needs one or is_allowed will never honor it.
 function _M.record(sname_canon, ip_canon, kid, ttl, opts)
   opts = opts or {}
   local now = opts.now or ngx.time()
@@ -166,6 +180,7 @@ function _M.record(sname_canon, ip_canon, kid, ttl, opts)
     manual = opts.manual or false,
     issued = now,
     exp = now + ttl,
+    secret_fp = opts.secret_fp,
   }
 end
 
@@ -219,7 +234,12 @@ function methods:list()
     local json = self.grants:get(k)
     if json then
       local rec = cjson.decode(json)
-      if rec then out[#out + 1] = rec end
+      if rec then
+        -- The admin listing has no use for the secret fingerprint, and for an
+        -- operator-chosen (weak) secret a hash is a crackable hint.
+        rec.secret_fp = nil
+        out[#out + 1] = rec
+      end
     end
   end
   return out

@@ -104,9 +104,10 @@ never win.
 
 - **State is process-wide and survives a config reload** (`caddy reload`), so
   reloading does not lock out already-knocked clients.
-- **Revoking a device:** remove its `token` line and reload. Grants are
-  re-checked against the registry on every request, so the removed device is
-  evicted on its next request rather than at TTL.
+- **Revoking a device:** remove its `token` line, or give the kid a new secret,
+  and reload. Grants are re-checked against the registry on every request,
+  including the secret they were minted under, so the removed or rotated device
+  is evicted on its next request rather than at TTL.
 - Grants and spent nonces are in-memory only: a full Caddy **restart** clears
   them and clients transparently re-knock.
 

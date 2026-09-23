@@ -357,22 +357,22 @@ def _regenerate(kwargs, db, request, Response):
 
     _write_tokens(db, entries)                                          # kid unchanged -> allow-lists untouched
     evicted, _ = _instance_post(kwargs, "/jitaccess/revoke-token", {"kid": kid})
-    # Do NOT claim the old device is out unless an instance confirmed it.
-    #
-    # Regenerating changes the secret in config, so the old device cannot knock
-    # AGAIN — but any grant it already holds stays live until its TTL, and the
-    # kid is unchanged, so nothing about the new config evicts it. If the
-    # revoke-token call did not reach an instance, saying "has been revoked" is
-    # simply false, and unlike delete (which removes the kid, so the next reload
-    # evicts on the registry re-check) this does not self-heal.
+    # Two things lock the old device out, on two clocks. revoke-token evicts its
+    # live grants NOW. The new secret takes effect at the next scheduler reload,
+    # and from then on every grant is re-checked against the secret it was
+    # minted under, so anything the old device wins in between by re-knocking
+    # with the old secret is evicted at the reload as well. Only the first half
+    # is confirmed here, so say exactly which half happened rather than "has
+    # been revoked and its old secret no longer works" as if both had.
     if evicted:
-        note = ("The previous device has been revoked and its old secret no longer works. "
-                "After the next reload, use Enroll device to enroll the replacement.")
+        note = ("The previous device has been revoked. Its old secret stops working at the "
+                "next reload, and any access it regains before then is evicted at the same "
+                "time. After the reload, use Enroll device to enroll the replacement.")
     else:
         note = ("WARNING: the new secret is saved, but no instance confirmed the revocation, "
-                "so any access the OLD device already holds remains valid until its grant "
-                "expires (JIT_ACCESS_GRANT_TIME). Check instance connectivity, or wait out "
-                "the grant TTL, before treating the old device as locked out.")
+                "so the OLD device keeps any access it already holds until the next reload, "
+                "when its grants stop matching the secret and are evicted. Check instance "
+                "connectivity if it is still admitted after that.")
     if _wants_json(request):
         return _json(Response, db, {
             "action": "regenerate", "kid": kid, "label": label, "revoked": bool(evicted),
