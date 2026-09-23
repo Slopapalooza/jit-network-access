@@ -38,7 +38,36 @@ Pick one of these before going to production:
 |---|---|---|
 | `externalTrafficPolicy: Local` | set it on the ingress-nginx Service | preserves the real client IP; traffic only reaches nodes running a controller pod |
 | PROXY protocol | enable on the LB **and** in the controller ConfigMap (`use-proxy-protocol: "true"`) | preserves the real IP through L4 LBs; both sides must agree or every request breaks |
-| Cloud LB with IP preservation | e.g. GKE container-native LB / NLB with IP targets | provider-specific |
+| Cloud LB with IP preservation | e.g. GKE container-native LB / NLB with IP targets; an **L7** LB additionally needs the two ConfigMap settings below | provider-specific |
+
+### If the load balancer is L7: `use-forwarded-headers` needs `proxy-real-ip-cidr`
+
+An L7 load balancer (a cloud HTTP(S) LB, or anything that terminates TLS and
+opens its own connection to the controller) delivers the client address only in
+`X-Forwarded-For`. To use it, the controller ConfigMap needs
+`use-forwarded-headers: "true"`, and that setting is only safe **together with**
+`proxy-real-ip-cidr` set to the load balancer's exact source range:
+
+```yaml
+use-forwarded-headers: "true"
+proxy-real-ip-cidr: "35.191.0.0/16,130.211.0.0/22"   # YOUR LB's source range, never the default
+```
+
+`proxy-real-ip-cidr` defaults to `0.0.0.0/0`. With the default, nginx takes the
+client's **own** `X-Forwarded-For` as the peer address, the auth subrequest
+carries that address from the trusted controller pod, and the Authorizer keys
+the grant on it:
+
+```bash
+curl -H 'X-Forwarded-For: 198.51.100.9' https://app.example.com/   # inherits 198.51.100.9's grant
+```
+
+The two-clients check below does not catch this, because honest clients still
+show their own addresses. `compute-full-forwarded-for` does not help either: the
+auth subrequest always sends the controller's resolved `$remote_addr`, never the
+chain. `use-proxy-protocol` reads the same `proxy-real-ip-cidr`, so narrow it
+there too, or a client that reaches the listener directly can send its own
+PROXY header.
 
 Verify before you trust it — the address in the log must be a real client, not a
 node or pod address:
@@ -57,10 +86,11 @@ kubectl exec -n jit-system deploy/jit-authorizer -- \
 
 If every grant shows the same IP, client-IP preservation is not working.
 
-**Belt and braces:** as a second line, set `ipv6_prefix: 128` (the default) and
-prefer `binding: "ip+cookie"` for anything sensitive. Cookie binding means a
-shared source IP is no longer sufficient on its own — see the
-[protocol overview](../../docs/how-it-works.md#5-grant-binding-why-ip-isnt-always-enough).
+**Whichever you pick, prefer `binding: "ip+cookie"` for anything sensitive.**
+It is the mitigation that survives a mistake above: a spoofed or shared source
+address is no longer sufficient on its own, because the grant also requires the
+cookie minted at the knock. Keep `ipv6_prefix: 128` (the default) as well. See
+the [protocol overview](../../docs/how-it-works.md#5-grant-binding-why-ip-isnt-always-enough).
 
 ---
 

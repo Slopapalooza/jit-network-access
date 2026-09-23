@@ -41,6 +41,13 @@ stringData:
   #      back to the controller's own address, and they SHARE a single grant —
   #      one person knocks and everybody is admitted.
   # Find the real CIDR with: kubectl -n ingress-nginx get pods -o wide
+  #
+  # The forwarded address is only as good as the controller's own $remote_addr.
+  # If the controller ConfigMap sets use-forwarded-headers: "true" (an L7 cloud
+  # LB in front), proxy-real-ip-cidr MUST be that LB's exact source range: its
+  # default is 0.0.0.0/0, which makes nginx take the client's own
+  # X-Forwarded-For as the peer address, and a forged header then inherits
+  # another client's grant. See the README, "If the load balancer is L7".
   config.json: |
     {
       "listen": "0.0.0.0:8998",
