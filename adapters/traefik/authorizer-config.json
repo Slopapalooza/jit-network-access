@@ -1,0 +1,30 @@
+{
+  "listen": "0.0.0.0:8998",
+
+  "trusted_proxies": ["172.28.0.0/24"],
+  "real_ip_header": "X-Forwarded-For",
+
+  "uri_prefix": "/.well-known/jit-access",
+  "grant_ttl": 3600,
+  "nonce_ttl": 60,
+  "enroll_ttl": 86400,
+  "ipv6_prefix": 128,
+  "rate_limit_per_min": 10,
+
+  "services": {
+    "app.example.com": {
+      "tokens": ["kid_REPLACE"],
+      "failure_mode": "interstitial",
+      "binding": "ip"
+    }
+  },
+
+  "tokens": [
+    {
+      "kid": "kid_REPLACE",
+      "secret": "REPLACE-with-base64url-of-32-random-bytes",
+      "label": "ops laptop",
+      "expires": 0
+    }
+  ]
+}

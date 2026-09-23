@@ -1,6 +1,12 @@
 # Traefik + Authorizer + a protected service, labels-based.
-# The Authorizer has NO published ports and NO router of its own: it is reachable
-# only from Traefik on the internal network.
+#
+# The Authorizer publishes no ports. Its ONLY router is the protocol prefix
+# (/.well-known/jit-access/), so /authz and /admin/* are never routable from
+# outside: they are reachable solely from Traefik on the internal network.
+#
+# Before `docker compose up`, edit authorizer-config.json next to this file:
+# replace the token secret (the Authorizer refuses to start on the placeholder)
+# and the hostname.
 
 services:
   traefik:
@@ -16,18 +22,25 @@ services:
     networks: [edge, internal]
 
   authorizer:
-    image: golang:1.24
+    # The internal network has no route out, and the Authorizer needs none: its
+    # only dependency is core/go, mounted with the repo below. GOTOOLCHAIN=local
+    # keeps `go run` from trying to fetch the toolchain named in go.mod.
+    image: golang:1.26
+    environment:
+      - GOTOOLCHAIN=local
     working_dir: /src/authorizer
     command: ["go", "run", "."]
     volumes:
       - ../..:/src:ro
       - ./authorizer-config.json:/src/authorizer/config.json:ro
     networks: [internal]
-    # deliberately: no ports, no traefik labels
-
-  app:
-    image: traefik/whoami
-    networks: [internal]
+    # No published ports. The protocol router lives HERE, on the container it
+    # routes to: Traefik's docker provider builds a service's address from the
+    # container that carries the label, so declaring jit-authorizer on the app
+    # container pointed it at the app's own address, where nothing listens on
+    # 8998, and no device could ever knock. Because this container declares a
+    # router of its own, Traefik also does not invent a default Host(`authorizer`)
+    # router that would expose everything else.
     labels:
       - traefik.enable=true
       - traefik.docker.network=internal
@@ -39,6 +52,13 @@ services:
       - traefik.http.routers.app-jit.tls=true
       - traefik.http.routers.app-jit.service=jit-authorizer
       - traefik.http.services.jit-authorizer.loadbalancer.server.port=8998
+
+  app:
+    image: traefik/whoami
+    networks: [internal]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=internal
 
       # 2. the gate
       - traefik.http.middlewares.jit-access.forwardauth.address=http://authorizer:8998/authz
@@ -56,3 +76,7 @@ networks:
   edge:
   internal:
     internal: true
+    # Pinned so authorizer-config.json's trusted_proxies can name it exactly.
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24

@@ -19,7 +19,10 @@ Traefik delegates to the [standalone Authorizer](../../authorizer) via a
 that exposes the protocol endpoints.
 
 See [`dynamic.yml`](dynamic.yml) for a complete file-provider example and
-[`docker-compose.yml`](docker-compose.yml) for a labels-based one.
+[`docker-compose.yml`](docker-compose.yml) for a labels-based one. The compose
+file reads [`authorizer-config.json`](authorizer-config.json) next to it:
+replace the placeholder token secret and the hostname before `docker compose
+up` (the Authorizer refuses to start on the placeholder).
 
 ## How it fits together
 
@@ -45,11 +48,13 @@ Two rules make it work:
 
 ## Security notes
 
-- Put the Authorizer on an **internal network only** (no published ports, no
-  Traefik router of its own). It refuses `/authz` and `/admin/*` from peers
-  outside `trusted_proxies`, but not being reachable is the real control.
-- Set the Authorizer's `trusted_proxies` to the network Traefik connects from
-  (e.g. the Docker bridge subnet `172.16.0.0/12`), **not** `0.0.0.0/0`.
+- Put the Authorizer on an **internal network only**: no published ports, and
+  no Traefik router beyond the protocol prefix, so `/authz` and `/admin/*` are
+  never routable from outside. It also refuses them from peers outside
+  `trusted_proxies`, but not being reachable is the real control.
+- Set the Authorizer's `trusted_proxies` to the network Traefik connects from,
+  **not** `0.0.0.0/0`. The compose file pins its internal network to
+  `172.28.0.0/24` and `authorizer-config.json` names exactly that.
 - Traefik sets `X-Forwarded-For` itself and, by default, appends to a
   client-supplied value. Ensure Traefik's own
   `entryPoints.<name>.forwardedHeaders.trustedIPs` is narrow (or unset) so a
