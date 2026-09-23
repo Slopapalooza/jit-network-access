@@ -852,6 +852,10 @@ func TestStealthIsByteIdenticalToPlatform404(t *testing.T) {
 	cases := map[string]*httptest.ResponseRecorder{
 		"wrong method on challenge": do(s, req(http.MethodPost, svcA, prefix+"/challenge", proxyIP, nil, nil)),
 		"unknown path under prefix": do(s, req(http.MethodGet, svcA, prefix+"/nope", proxyIP, nil, nil)),
+		// The register page was the one 200 a stealth host ever gave without a
+		// grant, and it named the product; the wrong method answered 405.
+		"register page":            do(s, req(http.MethodGet, svcA, prefix+"/register?code=abc", proxyIP, nil, nil)),
+		"wrong method on register": do(s, req(http.MethodPost, svcA, prefix+"/register", proxyIP, nil, nil)),
 	}
 	// exhaust the limiter, then a throttled challenge
 	for i := 0; i < 4; i++ {
@@ -942,6 +946,16 @@ func TestRegisterLandingPage(t *testing.T) {
 		if w2.Code != http.StatusOK || w2.Body.String() != body {
 			t.Errorf("register page differs for %q — that is an enrollment-code oracle", q)
 		}
+	}
+	// A wrong method gets the generic deny like every other endpoint, never a
+	// 405 that confirms the path exists.
+	if w3 := do(s, req(http.MethodPost, svcA, prefix+"/register", proxyIP, nil, nil)); w3.Code != http.StatusForbidden {
+		t.Errorf("POST register: got %d want the generic 403", w3.Code)
+	}
+	// And an unconfigured host gets nothing: the page is served per service,
+	// not globally.
+	if w4 := do(s, req(http.MethodGet, "not-configured.example.com", prefix+"/register", proxyIP, nil, nil)); w4.Code == http.StatusOK {
+		t.Error("register page served for an unconfigured service")
 	}
 }
 

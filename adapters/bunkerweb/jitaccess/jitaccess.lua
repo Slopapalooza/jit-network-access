@@ -428,6 +428,14 @@ function jitaccess:_access()
     -- Only a browser WITHOUT the extension gets here; an installed one
     -- intercepts the navigation client-side. Identical for any code value, so
     -- it is no enrollment-code oracle.
+    --
+    -- A stealth service does not announce the product either: this was the
+    -- one 200 a dark host ever gave without a grant, and it named the gate.
+    -- Registration links for a stealth site can point at any non-stealth
+    -- origin. deny() renders the platform 404 for stealth.
+    if (v["JIT_ACCESS_FAILURE_MODE"] or "interstitial") == "stealth" then
+      return self:deny("jit register on a stealth service")
+    end
     ngx.header["Content-Type"] = "text/html; charset=utf-8"
     ngx.header["Cache-Control"] = "no-store"
     ngx.header["Referrer-Policy"] = "no-referrer"   -- the URL carries a single-use code

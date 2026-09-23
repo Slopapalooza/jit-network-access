@@ -476,7 +476,15 @@ func (j *JITAccess) respond(w http.ResponseWriter, r *http.Request, service, ip 
 // register answers a registration link for a browser WITHOUT the extension; an
 // installed one intercepts that navigation client-side and never reaches here.
 // Identical for any code value, so it is no enrollment-code oracle.
+//
+// A stealth site does not announce the product either: this was the one 200 a
+// dark host ever gave without a grant, and it named the gate. Registration
+// links for a stealth site can point at any non-stealth origin.
 func (j *JITAccess) register(w http.ResponseWriter) {
+	if j.cfg.FailureMode == failStealth {
+		j.deny(w)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer") // the URL carries a single-use code

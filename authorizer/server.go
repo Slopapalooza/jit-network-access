@@ -423,9 +423,22 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 // It is served on the protected origin (inside the prefix carve-out) so it works
 // while the service is dark, and it is deliberately identical whatever code is
 // in the URL: no oracle for whether an enrollment code exists or is still valid.
+//
+// It follows the service's failure mode like every other endpoint. On a stealth
+// service it answers the platform 404: this was the one 200 a dark host ever
+// gave without a grant, and it named the product, so a single GET identified
+// the gate that stealth exists to hide. Registration links for a stealth site
+// can point at any non-stealth origin, and an installed extension intercepts
+// them client-side regardless. A non-GET gets the generic deny, not a 405 that
+// confirms the path exists.
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+	c, ok := s.resolve(r)
+	if !ok || !c.known {
+		s.deny(w, r, c, "unknown service")
+		return
+	}
+	if r.Method != http.MethodGet || s.config().failureMode(c.svc) == FailStealth {
+		s.deny(w, r, c, "register")
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

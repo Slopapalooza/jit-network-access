@@ -199,12 +199,16 @@ func TestUnknownKidAndBadProofLookIdentical(t *testing.T) {
 
 func TestStealthMode(t *testing.T) {
 	h := build(t, func(c *Config) { c.FailureMode = failStealth })
-	w := serve(h, mkreq(http.MethodGet, "/", "203.0.113.70:1000", nil))
-	if w.Code != http.StatusNotFound {
-		t.Errorf("stealth: got %d want 404", w.Code)
-	}
-	if w.Header().Get("X-JIT-Access") != "" {
-		t.Error("stealth must not advertise the gate")
+	// The register page was the one 200 a stealth site ever gave without a
+	// grant, and it named the product.
+	for _, p := range []string{"/", defaultPrefix + "/register?code=abc"} {
+		w := serve(h, mkreq(http.MethodGet, p, "203.0.113.70:1000", nil))
+		if w.Code != http.StatusNotFound {
+			t.Errorf("stealth %s: got %d want 404", p, w.Code)
+		}
+		if w.Header().Get("X-JIT-Access") != "" {
+			t.Errorf("stealth %s must not advertise the gate", p)
+		}
 	}
 }
 
