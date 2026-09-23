@@ -127,6 +127,12 @@ else
   say "system user '$SVC_USER' already exists"
 fi
 
+# Remember what is installed now, so an upgrade can tell whether a running
+# service is still serving the previous binary or unit.
+filesum() { if [ -e "$1" ]; then sha256sum "$1" | cut -d' ' -f1; fi; }
+OLD_BIN_SUM="$(filesum "$PREFIX/bin/$BIN_NAME")"
+OLD_UNIT_SUM="$(filesum "$UNIT")"
+
 install -o root -g root -m 0755 "$TMP/$BIN_NAME" "$PREFIX/bin/$BIN_NAME"
 ok "installed $PREFIX/bin/$BIN_NAME ($("$PREFIX/bin/$BIN_NAME" -version))"
 
@@ -193,7 +199,18 @@ ok "config validates"
 if [ "$NO_START" -eq 1 ]; then
   say "not starting (--no-start). Start with: systemctl enable --now jit-authorizer"
 else
-  systemctl enable --now jit-authorizer.service
+  if systemctl is-active --quiet jit-authorizer.service \
+     && { [ "$OLD_BIN_SUM" != "$(filesum "$PREFIX/bin/$BIN_NAME")" ] \
+          || [ "$OLD_UNIT_SUM" != "$(filesum "$UNIT")" ]; }; then
+    # A running service keeps serving the binary it started with, and
+    # `enable --now` is a no-op on an active unit, so an upgrade used to report
+    # success while the previous version kept running. A restart drops live
+    # grants (they are in-process); enrolled browsers re-knock transparently.
+    systemctl restart jit-authorizer.service
+    ok "restarted: the binary or unit changed (live grants were reset; browsers re-knock)"
+  else
+    systemctl enable --now jit-authorizer.service
+  fi
   sleep 1
   if systemctl is-active --quiet jit-authorizer.service; then
     ok "jit-authorizer is running on 127.0.0.1:8998"

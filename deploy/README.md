@@ -33,7 +33,11 @@ sudo ./debian/install.sh --binary ./jitaccess-authorizer
 | user `jitaccess` | system user, no shell, no home |
 
 Re-running is safe: an existing config is never overwritten and the user is not
-recreated. `--uninstall` deliberately leaves the config and the user behind,
+recreated. Re-running with a newer `--version` is the upgrade path: the binary
+and unit are replaced and, if the service is running and either of them changed,
+it is restarted so the new version is actually what serves. That restart drops
+live grants (they are in-process); enrolled browsers re-knock transparently.
+`--uninstall` deliberately leaves the config and the user behind,
 because the config holds device secrets that may still be enrolled in browsers —
 revoke them server-side before deleting it.
 
