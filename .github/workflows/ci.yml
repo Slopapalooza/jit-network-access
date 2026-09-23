@@ -191,6 +191,13 @@ jobs:
       - name: Lua port vs vectors
         run: python3 core/lua/canon_port_check.py core/testdata/vectors.json
 
+      # The vectors are generated and the generator is the third witness. A red
+      # --check means the file was hand-edited or the Python reference moved;
+      # either way a regeneration would then silently drop whatever the file
+      # alone was carrying, which is how 18 regression pins nearly vanished.
+      - name: vectors match their generator
+        run: python3 core/testdata/generate_vectors.py --check
+
       - name: browser crypto vs vectors
         run: node src/jitcrypto.test.mjs
         working-directory: extension

@@ -96,18 +96,62 @@ def build_vectors() -> dict:
         })
 
     # --- server_name canonicalization ---
-    for host in ["grafana.example.com", "Grafana.Example.COM", "grafana.example.com.",
-                 "grafana.example.com:8443", "GRAFANA.example.com.:443",
-                 "wiki.internal", "xn--caf-dma.example.com", "9wiki.internal",
-                 # PROTOCOL §4 step 1 — bracketed IPv6 literals. Unpinned until
-                 # now, and the Lua reference had already diverged: it returned
-                 # the bracket contents WITHOUT trimming, so "[ ::1 ]" produced a
-                 # different MAC input and a different grant key than Python/Go
-                 # for the same client.
-                 "[2001:db8::1]", "[2001:DB8::1]:8443", "[ ::1 ]", "[::1]",
-                 # whitespace around the whole value
-                 "  grafana.example.com  "]:
-        v["canon_server_name"].append({"in": host, "out": canon_server_name(host)})
+    # (host, note). A note marks a case pinned after a real cross-language
+    # divergence, and it travels into the vector so the reason survives beside
+    # the regression it guards. The noted cases used to exist ONLY in
+    # vectors.json, hand-added after the differential fuzzer caught the bugs,
+    # which left --check permanently red and a plain regeneration one command
+    # away from silently deleting every one of them.
+    name_cases = [
+        ("grafana.example.com", None),
+        ("Grafana.Example.COM", None),
+        ("grafana.example.com.", None),
+        ("grafana.example.com:8443", None),
+        ("GRAFANA.example.com.:443", None),
+        ("wiki.internal", None),
+        ("xn--caf-dma.example.com", None),
+        ("9wiki.internal", None),
+        # PROTOCOL §4 step 1 — bracketed IPv6 literals. Unpinned until now, and
+        # the Lua reference had already diverged: it returned the bracket
+        # contents WITHOUT trimming, so "[ ::1 ]" produced a different MAC input
+        # and a different grant key than Python/Go for the same client.
+        ("[2001:db8::1]", None),
+        ("[2001:DB8::1]:8443", None),
+        ("[ ::1 ]", None),
+        ("[::1]", None),
+        # whitespace around the whole value
+        ("  grafana.example.com  ", None),
+        # The port strip must fire only on host:port, never inside a bare IPv6
+        # literal: 2001:db8::1 and 2001:db8::2 both canonicalized to "2001:db8:"
+        # and two services shared one grant key.
+        ("2001:db8::1", "unbracketed IPv6 keeps its last group"),
+        ("2001:db8::2", "...and stays distinct from ::1"),
+        ("::1", "loopback literal is not a host:port"),
+        ("fe80::1", "link-local literal is not a host:port"),
+        ("[a:80]", "brackets around a non-IPv6 host still yield a port strip"),
+        # Trim, unbracket, strip the port and trim again, to a fixpoint. Each of
+        # these exposed a step that ran once and left something for another.
+        ("..", "every trailing dot goes, not just one"),
+        ("...", "same, three"),
+        ("example.com..", "doubled root label"),
+        ("example.com:443.", "trailing dot must not hide the port from the strip"),
+        ("[:0.", "unterminated bracket, dot exposing a port"),
+        ("host :80", "space before the port does not survive"),
+        ("[]", "empty bracketed host"),
+        ("[]:80", "empty bracketed host with a port"),
+        ("[example.com.]", "bracketed name still loses its root label"),
+        ("[example.com.]:443", "...and its port"),
+        # Digit, letter and whitespace classes are ASCII-only, pinned so no
+        # language's Unicode-aware library quietly widens them.
+        ("host:٤٤٣", "Arabic-Indic digits are not a port"),
+        ("CAFÉ.example.com", "non-ASCII letters are left alone"),
+        ("host ", "U+00A0 is not whitespace to trim"),
+    ]
+    for host, note in name_cases:
+        entry = {"in": host, "out": canon_server_name(host)}
+        if note:
+            entry["note"] = note
+        v["canon_server_name"].append(entry)
 
     # --- ip canonicalization ---
     ip_cases = [
