@@ -43,17 +43,18 @@ func adminJSON(t *testing.T, s *Server, method, path, body string) (int, map[str
 func TestAdminGrantCreatesAndRevokesAccess(t *testing.T) {
 	s := testServer(t, nil)
 
-	// Dark before.
+	// Dark before. The manual grant targets the client the proxy reports, not the
+	// proxy itself: a trusted peer naming no client is denied, never keyed on.
 	if w := authz(s, svcA, proxyIP, "/", nil); w.Code == http.StatusNoContent {
 		t.Fatal("precondition: service should be dark")
 	}
 
 	code, out := adminJSON(t, s, http.MethodPost, "/admin/grant",
-		`{"service":"`+svcA+`","ip":"127.0.0.1","ttl":120}`)
+		`{"service":"`+svcA+`","ip":"`+proxiedClient+`","ttl":120}`)
 	if code != http.StatusOK || out["granted"] != true {
 		t.Fatalf("grant: got %d %v", code, out)
 	}
-	if out["ip"] != "127.0.0.1" || out["service"] != svcA {
+	if out["ip"] != proxiedClient || out["service"] != svcA {
 		t.Errorf("grant echoed the wrong target: %v", out)
 	}
 	if w := authz(s, svcA, proxyIP, "/", nil); w.Code != http.StatusNoContent {
@@ -68,7 +69,7 @@ func TestAdminGrantCreatesAndRevokesAccess(t *testing.T) {
 	}
 
 	code, out = adminJSON(t, s, http.MethodPost, "/admin/revoke",
-		`{"service":"`+svcA+`","ip":"127.0.0.1"}`)
+		`{"service":"`+svcA+`","ip":"`+proxiedClient+`"}`)
 	if code != http.StatusOK || out["revoked"] != true {
 		t.Fatalf("revoke: got %d %v", code, out)
 	}
@@ -78,7 +79,7 @@ func TestAdminGrantCreatesAndRevokesAccess(t *testing.T) {
 
 	// Revoking again reports nothing removed rather than lying.
 	if _, out2 := adminJSON(t, s, http.MethodPost, "/admin/revoke",
-		`{"service":"`+svcA+`","ip":"127.0.0.1"}`); out2["revoked"] != false {
+		`{"service":"`+svcA+`","ip":"`+proxiedClient+`"}`); out2["revoked"] != false {
 		t.Errorf("second revoke should report false, got %v", out2)
 	}
 }

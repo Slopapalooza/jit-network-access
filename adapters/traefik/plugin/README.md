@@ -132,6 +132,14 @@ exactly the part the client wrote. `forwardedHeaders.trustedIPs` alone is
 therefore **not** sufficient to make this switch safe; the plugin needs its own
 list to know which entries to skip.
 
+The two lists work together, and both are needed. A trusted peer whose chain
+names **no** untrusted address is denied rather than keyed on the peer, because
+keying on the peer would hand every client behind that proxy one shared grant,
+silently. With Traefik the common way to land there is an edge proxy listed in
+`trustedProxies` but missing from `forwardedHeaders.trustedIPs`: Traefik then
+drops the header before the plugin sees it, and every request is denied. That
+denial is the misconfiguration made visible; add the edge to both lists.
+
 ## Development
 
 The portable core is **vendored** into `internal/jitcore` by

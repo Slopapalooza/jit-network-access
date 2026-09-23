@@ -94,6 +94,13 @@ jit_access {
 half-configured gate fails to start rather than silently letting every client
 choose its own grant key.
 
+A trusted peer whose chain names **no** untrusted address (the header missing,
+or every hop in it trusted) is denied rather than keyed on the peer. Keying on
+the peer would hand every client behind that proxy one shared grant, silently;
+a denial is a misconfiguration you notice. If every request is denied after
+enabling this, the upstream proxy is not setting `X-Forwarded-For`, or your
+clients live inside `trusted_proxies`.
+
 The handler keeps its **own** trusted-proxy list rather than reading Caddy's
 server-level `trusted_proxies`. That is deliberate: Caddy's
 `http.request.client_ip` resolves to the *left-most* `X-Forwarded-For` entry —

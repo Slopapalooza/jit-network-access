@@ -118,10 +118,11 @@ earlier versions of this manifest did) breaks the design in two separate ways:
    a no-op and any workload in the cluster can drive the gate.
 2. Resolving the client IP **skips** every candidate inside the list. On an
    on-prem or VPN cluster where users are on `10.x`, a broad list means every
-   client is skipped, everyone falls back to the controller's own address, and
-   they all **share one grant** — one person knocks and everybody is admitted.
-   The `externalTrafficPolicy` warning above does not catch this, because it
-   only affects external clients.
+   client is skipped and nothing identifies a client, so **every request is
+   denied**. (Earlier versions fell back to the controller's own address and
+   everyone silently **shared one grant**; a lockout you notice replaced a
+   shared grant you would not.) The `externalTrafficPolicy` warning above does
+   not catch this, because it only affects external clients.
 
 Find yours with `kubectl -n ingress-nginx get pods -o wide`.
 

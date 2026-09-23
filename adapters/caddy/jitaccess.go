@@ -334,8 +334,13 @@ func (j *JITAccess) clientIP(r *http.Request) (string, error) {
 		}
 		return jitcore.CanonIP(a.String(), j.IPv6Prefix, 32)
 	}
-	// A trusted peer that forwarded nothing usable (health check, direct hit).
-	return jitcore.CanonIP(peer.String(), j.IPv6Prefix, 32)
+	// A trusted peer that forwarded no usable client address: nothing here
+	// identifies the client, so there is nothing safe to key a grant on.
+	// Keying it on the peer's own address, as this once did, silently gave
+	// every client behind that proxy ONE shared grant whenever the proxy
+	// omitted the header or every hop in the chain was itself trusted. Deny
+	// instead: a lockout an operator notices beats a shared grant nobody does.
+	return "", fmt.Errorf("jit_access: trusted peer %s forwarded no untrusted client address", peer)
 }
 
 func (j *JITAccess) allowedForService(kid string) bool {

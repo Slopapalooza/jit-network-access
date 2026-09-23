@@ -60,7 +60,15 @@ func secretBytes(t *testing.T) []byte {
 	return b
 }
 
-// req builds a forward-auth style request as a proxy would send it.
+// proxiedClient is the address the proxy reports for a request the tests send
+// from proxyIP without naming a client themselves. A real proxy always sets the
+// header; a trusted peer that sends none is denied outright, since nothing then
+// identifies the client and keying on the proxy gave everyone behind it one
+// shared grant.
+const proxiedClient = "198.51.100.42"
+
+// req builds a forward-auth style request as a proxy would send it: from
+// proxyIP, it carries X-Forwarded-For unless the test set (or blanked) one.
 func req(method, host, path, remoteAddr string, hdrs map[string]string, body []byte) *http.Request {
 	var r *http.Request
 	if body != nil {
@@ -71,6 +79,9 @@ func req(method, host, path, remoteAddr string, hdrs map[string]string, body []b
 	r.RemoteAddr = remoteAddr
 	for k, v := range hdrs {
 		r.Header.Set(k, v)
+	}
+	if _, explicit := hdrs["X-Forwarded-For"]; remoteAddr == proxyIP && !explicit {
+		r.Header.Set("X-Forwarded-For", proxiedClient)
 	}
 	return r
 }
@@ -704,13 +715,13 @@ func TestIngressNginxOriginalURL(t *testing.T) {
 	}
 
 	// ...then authorize the way ingress-nginx does it
+	// ingress-nginx sets X-Forwarded-For to the controller's resolved
+	// $remote_addr on the subrequest; the knock above came from the same client.
 	r := req(http.MethodGet, "jit-authorizer.jit-system.svc.cluster.local", "/authz", proxyIP, map[string]string{
 		"X-Original-URL":    "https://" + svcA + "/dashboard?x=1",
 		"X-Original-Method": "GET",
-		"X-Forwarded-For":   "203.0.113.5",
+		"X-Forwarded-For":   proxiedClient,
 	}, nil)
-	// the knock above came from the proxy peer with no XFF, so key on the same
-	r.Header.Del("X-Forwarded-For")
 	if w := do(s, r); w.Code != http.StatusNoContent {
 		t.Errorf("ingress-nginx style authz: got %d want 204 (X-Original-URL not honored?)", w.Code)
 	}

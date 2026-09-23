@@ -37,9 +37,9 @@ stringData:
   #      cluster sits inside 10/8 by default, so listing 10/8 makes that check a
   #      no-op and any workload in the cluster can drive the gate.
   #   2. Resolving the client IP SKIPS every candidate inside this list. With
-  #      10/8 trusted, on-prem clients on 10.x are all skipped, everyone falls
-  #      back to the controller's own address, and they SHARE a single grant —
-  #      one person knocks and everybody is admitted.
+  #      10/8 trusted, on-prem clients on 10.x are all skipped, nothing
+  #      identifies a client, and every request is DENIED. (It used to fall
+  #      back to the controller's own address and silently share one grant.)
   # Find the real CIDR with: kubectl -n ingress-nginx get pods -o wide
   #
   # The forwarded address is only as good as the controller's own $remote_addr.

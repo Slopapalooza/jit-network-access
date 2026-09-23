@@ -292,7 +292,11 @@ func parseHostAddr(s string) (netip.Addr, error) {
 // key, and Traefik makes that worse by preserving an incoming header verbatim.
 //
 // Anything unparseable, or a peer that is not itself trusted, falls back to the
-// peer: never to a client-supplied value.
+// peer: never to a client-supplied value. A TRUSTED peer whose chain names no
+// untrusted address is denied, never keyed on the peer: Traefik drops an
+// X-Forwarded-For it does not trust (entryPoints.<name>.forwardedHeaders), so
+// an edge proxy missing from that list reaches here with an empty chain, and
+// keying on the peer handed everyone behind it one shared grant.
 func (j *JITAccess) clientIP(r *http.Request) (string, error) {
 	peer, err := parseHostAddr(r.RemoteAddr)
 	if err != nil {
@@ -318,8 +322,10 @@ func (j *JITAccess) clientIP(r *http.Request) (string, error) {
 		}
 		return jitcore.CanonIP(a.String(), j.cfg.IPv6Prefix, 32)
 	}
-	// A trusted peer that forwarded nothing usable (health check, direct hit).
-	return jitcore.CanonIP(peer.String(), j.cfg.IPv6Prefix, 32)
+	// A trusted peer that forwarded no usable client address: nothing here
+	// identifies the client, so there is nothing safe to key a grant on. Deny;
+	// a lockout an operator notices beats a shared grant nobody does.
+	return "", fmt.Errorf("jitaccess: trusted peer %s forwarded no untrusted client address", peer)
 }
 
 func (j *JITAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) {

@@ -44,11 +44,20 @@ func FuzzClientIPIgnoresPrependedXFF(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, prepended string, a, b, c, d byte) {
+		client := fmt.Sprintf("%d.%d.%d.%d", a, b, c, d)
 		// 10/8 is our own proxy range: an address in it is a hop, not a client.
+		// A chain made only of hops identifies nobody, and must deny rather than
+		// key the grant on infrastructure and hand everyone behind the proxy one
+		// shared grant. This case used to be skipped, which is how the fallback
+		// to the peer's own address went unexercised.
 		if a == 10 {
+			r := mkreq(http.MethodGet, "/", "10.0.0.1:5000", nil)
+			r.Header.Set("X-Forwarded-For", client+", 10.0.0.1")
+			if got, err := j.clientIP(r); err == nil {
+				t.Fatalf("all-trusted chain %q resolved to %q; must be denied", client+", 10.0.0.1", got)
+			}
 			return
 		}
-		client := fmt.Sprintf("%d.%d.%d.%d", a, b, c, d)
 		want, err := jitcore.CanonIP(client, j.IPv6Prefix, 32)
 		if err != nil {
 			return

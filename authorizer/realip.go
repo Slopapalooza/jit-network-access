@@ -98,12 +98,13 @@ func (c *Config) ClientIP(r *http.Request) (string, bool, error) {
 		}
 		return canon, true, nil
 	}
-	// A trusted proxy that forwarded nothing usable (e.g. a health check).
-	canon, err := jitcore.CanonIP(peer.String(), c.IPv6Prefix, 32)
-	if err != nil {
-		return "", true, err
-	}
-	return canon, true, nil
+	// A trusted proxy that forwarded no usable client address: nothing here
+	// identifies the client, so there is nothing safe to key a grant on.
+	// Keying it on the proxy's own address, as this once did, silently gave
+	// every client behind that proxy ONE shared grant whenever the proxy
+	// omitted the header or every hop in the chain was itself trusted. Deny
+	// instead: a lockout an operator notices beats a shared grant nobody does.
+	return "", true, errNoClientIP
 }
 
 func forwardedList(r *http.Request, header string) []string {

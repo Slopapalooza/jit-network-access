@@ -245,3 +245,31 @@ func TestDirectClientForwardedHeadersIgnored(t *testing.T) {
 		t.Error("SECURITY: untrusted peer was authorized")
 	}
 }
+
+// A trusted proxy that forwards no usable client address identifies nobody.
+// This used to key the grant on the proxy's own address, so every client behind
+// a proxy that omitted the header, or a chain made only of trusted hops, shared
+// ONE grant. Now it is denied: a lockout an operator notices.
+func TestTrustedPeerWithoutClientAddressIsDenied(t *testing.T) {
+	s := testServer(t, nil)
+	prefix := s.config().URIPrefix
+	for name, hdrs := range map[string]map[string]string{
+		"no header":        {"X-Forwarded-For": ""},
+		"all trusted hops": {"X-Forwarded-For": "127.0.0.1, ::1"},
+		"unparseable only": {"X-Forwarded-For": "not-an-ip, ,"},
+	} {
+		if ip, _, err := s.config().ClientIP(req(http.MethodGet, svcA, "/", proxyIP, hdrs, nil)); err == nil {
+			t.Errorf("%s: trusted peer resolved to %q; must be denied", name, ip)
+		}
+		if w := do(s, req(http.MethodGet, svcA, prefix+"/challenge", proxyIP, hdrs, nil)); w.Code == http.StatusNoContent {
+			t.Errorf("%s: challenge issued to a request with no client identity", name)
+		}
+		if w := authz(s, svcA, proxyIP, "/", hdrs); w.Code == http.StatusNoContent {
+			t.Errorf("%s: SECURITY: authz admitted a request with no client identity", name)
+		}
+	}
+	// The proxy that DOES name a client is unaffected.
+	if _, _, err := s.config().ClientIP(req(http.MethodGet, svcA, "/", proxyIP, nil, nil)); err != nil {
+		t.Errorf("proxied request naming a client: %v", err)
+	}
+}
