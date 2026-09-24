@@ -89,6 +89,13 @@ over TLS at `/enroll`.
   and reload. Grants are re-checked against the registry on every request,
   including the secret they were minted under, so the removed or rotated device
   is evicted on its next request rather than at TTL.
+- **One server block per gated host, configured name first.** The service is
+  resolved from nginx's `$server_name`, which is the *first* name in the
+  block's `server_name` directive. A block whose first name is not a configured
+  service denies everything and logs one `ERR` line saying so; a catch-all
+  block (`server_name _;`) is refused the same way, because the only name left
+  there is the client's `Host` header, which would let the client choose which
+  service's policy and grants apply to that block's upstream.
 - **Fail-closed:** the whole access path is wrapped in `pcall`, so any thrown
   error denies. A `pcall` cannot see a clean early return, so the "`init()`
   never ran" case — a missing or mistyped `init_by_lua_block` include — is

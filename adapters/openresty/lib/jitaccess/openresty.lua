@@ -118,11 +118,22 @@ end
 -- is the name nginx MATCHED from the config, which no header can move. Prefer
 -- the latter, exactly as the BunkerWeb sibling does.
 --
--- $host is still consulted when the matched block has no usable server_name
--- (e.g. `server_name _;`), but only if it names a CONFIGURED service — otherwise
--- a mismatched Host on a default_server used to fall through to deny(nil), which
--- renders the INTERSTITIAL regardless of the service's failure_mode, announcing a
--- gate the operator configured to be invisible.
+-- $host is never a substitute. A catch-all block (`server_name _;`) has no
+-- name of its own, and resolving from Host there let a client pick which
+-- configured service's policy and grants applied to that block's upstream. Such
+-- blocks are refused with an ERR line, as is a block whose first name is not a
+-- configured service: both used to be silent lockouts. One server block per
+-- gated host, first name first.
+-- Operator errors are logged once per key, not once per request: a silent
+-- lockout is the failure mode this replaces, and a flood of identical lines
+-- would be the next one.
+local warned = {}
+local function warn_once(key, ...)
+  if warned[key] then return end
+  warned[key] = true
+  ngx.log(ngx.ERR, ...)
+end
+
 local function service_name()
   local sn = ngx.var.server_name
   local from_sn
@@ -158,8 +169,25 @@ local function service_name()
     return nil
   end
 
-  if from_sn then return from_sn end
-  if from_host and cfg and cfg.services[from_host] then return from_host end
+  if from_sn then
+    if not (cfg and cfg.services[from_sn]) then
+      -- The block's first name is not a configured service. Every request to
+      -- it is denied, which used to happen in silence: say so, once per name.
+      warn_once("sn:" .. from_sn, "jitaccess: this server block's first server_name '", from_sn,
+        "' is not a configured service, so every request to it is denied. Give each gated ",
+        "host its own server block whose FIRST server_name is the configured service name.")
+      return nil
+    end
+    return from_sn
+  end
+  -- server_name "_" or none: a catch-all block. The only name left is the
+  -- client's Host header, which would let the client choose which configured
+  -- service's policy and grants apply to THIS block's upstream. Refuse, loudly.
+  if from_host and cfg and cfg.services[from_host] then
+    warn_once("catchall:" .. from_host, "jitaccess: a catch-all server block (server_name _) cannot be gated: ",
+      "the service would be chosen by the client's Host header. Give '", from_host,
+      "' its own server block.")
+  end
   return nil
 end
 
@@ -334,11 +362,22 @@ local function enroll(sname, ip, svc)
   if not rec then return deny(svc) end
   local token = registry:lookup(rec.kid)
   if not token then return deny(svc) end
-  ngx.header["X-JIT-Kid"] = rec.kid
-  ngx.header["X-JIT-Secret"] = ccrypto.b64u_encode(token.secret)
-  ngx.header["X-JIT-Alg"] = token.alg or "HMAC-SHA256"
-  ngx.header["X-JIT-Origins"] = table.concat(rec.origins or {}, ",")
+  -- Cache-Control FIRST, and everything fallible BEFORE the secret header. A
+  -- non-string in origins (an admin-location typo) made table.concat throw
+  -- after X-JIT-Secret was set and before no-store was; the pcall around
+  -- access() then exited 403 with the secret in the headers nginx had already
+  -- collected and no cache directive, and the code was already consumed. The
+  -- BunkerWeb plugin fixed the same ordering earlier.
   ngx.header["Cache-Control"] = "no-store"
+  local origins = {}
+  for _, o in ipairs(rec.origins or {}) do
+    if type(o) == "string" then origins[#origins + 1] = o end
+  end
+  local origins_hdr = table.concat(origins, ",")
+  ngx.header["X-JIT-Kid"] = rec.kid
+  ngx.header["X-JIT-Alg"] = token.alg or "HMAC-SHA256"
+  ngx.header["X-JIT-Origins"] = origins_hdr
+  ngx.header["X-JIT-Secret"] = ccrypto.b64u_encode(token.secret)
   return ngx.exit(ngx.HTTP_NO_CONTENT)
 end
 
@@ -417,8 +456,11 @@ function _M.mint_enroll_code(kid, origins, ttl)
   local raw = ccrypto.random_bytes(12)
   if not raw then return nil, "rng failed" end
   local code = ccrypto.b64u_encode(raw)
-  local ok, err = store:enroll_code_put(code, { kid = kid, origins = origins or {} },
-                                        tonumber(ttl) or cfg.enroll_ttl)
+  -- Clamp like every other engine: shdict treats 0 as "never expire", so an
+  -- explicit ttl of 0 used to mint a single-use code that never expired.
+  local t = tonumber(ttl) or cfg.enroll_ttl
+  if t < 300 then t = 300 elseif t > 604800 then t = 604800 end
+  local ok, err = store:enroll_code_put(code, { kid = kid, origins = origins or {} }, t)
   if not ok then return nil, err end
   return code
 end
