@@ -79,6 +79,8 @@ function jitaccess:initialize(ctx)
   local tokens = self.internalstore and self.internalstore:get("plugin_jitaccess_registry", true) or {}
   local services = self.internalstore and self.internalstore:get("plugin_jitaccess_services", true) or {}
   self.registry = cregistry.new(tokens, services)
+  -- first-name -> set of every canonical name in that service's SERVER_NAME
+  self.aliases = self.internalstore and self.internalstore:get("plugin_jitaccess_aliases", true) or {}
   self.nonce_key = self.internalstore and self.internalstore:get("plugin_jitaccess_noncekey", true)
   -- rate limit (best-effort, per-IP, on knock endpoints)
   local rl = self.variables and self.variables["JIT_ACCESS_RATELIMIT"] or "10r/m"
@@ -92,18 +94,24 @@ function jitaccess:init()
   if CORE_ERR then
     return self:ret(false, "jitaccess core failed to load (run adapters/bunkerweb/build-vendor.sh): " .. CORE_ERR)
   end
-  local variables, err = get_multiple_variables({ "USE_JIT_ACCESS", "JIT_ACCESS_TOKENS", "JIT_ACCESS_TOKEN" })
+  local variables, err = get_multiple_variables({ "USE_JIT_ACCESS", "JIT_ACCESS_TOKENS", "JIT_ACCESS_TOKEN", "SERVER_NAME" })
   if not variables then
     return self:ret(false, "can't read jitaccess variables: " .. tostring(err))
   end
 
   -- token registry from the global JIT_ACCESS_TOKEN_* entries
   local tokens, ntok = {}, 0
+  local seen, dup = {}, {}
   local gvars = variables["global"] or {}
   for key, value in pairs(gvars) do
     if value ~= "" and key:match("^JIT_ACCESS_TOKEN(_?%d*)$") then
       local kid, b64secret, rest = value:match("^([^:]+):([^:]+):(.*)$")
       if kid and b64secret then
+        -- The same kid in two slots (a hand edit; the registry job refuses it
+        -- but cannot block config generation) used to be resolved by pairs()
+        -- order: which secret won changed between reloads, with no log line.
+        if seen[kid] then dup[kid] = true end
+        seen[kid] = true
         local secret = ccrypto.b64u_decode(b64secret)
         if secret and #secret >= 16 then
           local label, expires = rest, nil
@@ -118,20 +126,44 @@ function jitaccess:init()
     end
   end
 
+  for kid in pairs(dup) do
+    tokens[kid] = nil
+    self.logger:log(ngx.ERR, "jitaccess: kid " .. kid .. " appears in more than one JIT_ACCESS_TOKEN slot; "
+      .. "which secret won used to change between reloads, so it is refused until the config carries it once")
+  end
+  ntok = 0
+  for _ in pairs(tokens) do ntok = ntok + 1 end
+
   -- per-service allow-lists (which kids may open which canonical service)
-  local services = {}
+  local services, aliases = {}, {}
   for scope, vars in pairs(variables) do
     if scope ~= "global" and vars["USE_JIT_ACCESS"] == "yes" then
       local allow = {}
       for kid in tostring(vars["JIT_ACCESS_TOKENS"] or ""):gmatch("%S+") do
-        if kid == "*" then allow["*"] = true else allow[kid] = true end
+        -- "-" is the UI's explicit "nobody" list: a kid that cannot exist,
+        -- stored instead of an empty value so the site never inherits the
+        -- global list. It would admit nobody anyway; skip it for clarity.
+        if kid == "*" then allow["*"] = true elseif kid ~= "-" then allow[kid] = true end
       end
-      services[ccanon.canon_server_name(scope)] = allow
+      -- Every name in the service's SERVER_NAME shares the allow-list, not just
+      -- the first: a browser on an alias signs its proof over the alias, and
+      -- server_name_canon() binds to it when it is one of this service's own
+      -- names. Without this the alias was never knockable.
+      local first = ccanon.canon_server_name(scope)
+      local names = { [first] = true }
+      services[first] = allow
+      for name in tostring(vars["SERVER_NAME"] or ""):gmatch("%S+") do
+        local c = ccanon.canon_server_name(name)
+        services[c] = allow
+        names[c] = true
+      end
+      aliases[first] = names
     end
   end
 
   self.internalstore:set("plugin_jitaccess_registry", tokens, nil, true)
   self.internalstore:set("plugin_jitaccess_services", services, nil, true)
+  self.internalstore:set("plugin_jitaccess_aliases", aliases, nil, true)
 
   -- ephemeral per-instance nonce key (kept across reloads while shm survives)
   local nk = self.internalstore:get("plugin_jitaccess_noncekey", true)
@@ -153,7 +185,20 @@ end
 function jitaccess:server_name_canon()
   local sn = (ngx.ctx.bw and ngx.ctx.bw.server_name) or ngx.var.server_name
   if not sn or sn == "" then return nil end
-  return ccanon.canon_server_name(sn)
+  -- $server_name is the FIRST name of a multi-name SERVER_NAME, but a browser
+  -- on an alias signs its proof over the alias, so binding the nonce and the
+  -- grant to the first name made every alias permanently un-knockable. When
+  -- the Host names one of THIS service's own configured names, bind to that.
+  -- Only this service's names: a Host from anywhere else must not be able to
+  -- pick the identity the request is evaluated under.
+  local first = ccanon.canon_server_name(sn)
+  local host = ngx.var.host
+  if host and host ~= "" then
+    local hc = ccanon.canon_server_name(host)
+    local names = self.aliases and self.aliases[first]
+    if names and names[hc] then return hc end
+  end
+  return first
 end
 
 -- Clamped, like the Go engines do at config load. canon_ip now REJECTS an
@@ -422,6 +467,10 @@ function jitaccess:_access()
 
   -- Protocol endpoints, served BEFORE the grant check (a knocker isn't granted).
   local prefix = v["JIT_ACCESS_URI_PREFIX"] or "/.well-known/jit-access"
+  -- nginx's $uri has merged slashes and the setting's regex admitted "/knock/"
+  -- or "/a//b", so a prefix typed either way could never match an endpoint and
+  -- every request was denied with no diagnostic. Normalize the same way.
+  prefix = "/" .. (((prefix:gsub("/+", "/")):gsub("^/", "")):gsub("/$", ""))
   local uri = ngx.var.uri or ""
   local method = ngx.req.get_method()
   if uri == prefix .. "/challenge" and method == "GET" then

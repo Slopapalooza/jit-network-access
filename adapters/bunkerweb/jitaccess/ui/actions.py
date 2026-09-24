@@ -80,7 +80,7 @@ def _read_state(db):
     for s in names:
         if cfg.get(f"{s}_USE_JIT_ACCESS", g_use) == "yes":
             jit_services.append(s)
-        allow[s] = set((cfg.get(f"{s}_JIT_ACCESS_TOKENS", g_tok) or "").split())
+        allow[s] = _allow_set(cfg.get(f"{s}_JIT_ACCESS_TOKENS", g_tok))
     tokens = []
     for _k, entry in _token_entries(cfg):
         t = _parse_entry(entry)
@@ -117,6 +117,26 @@ def pre_render(**kwargs):
 
 
 # ---- config writes (validated surgical against a hot DB copy) --------------
+
+# NOBODY is the explicit "no device may open this site" allow-list. An EMPTY
+# per-service JIT_ACCESS_TOKENS is not safe for that: it equals the setting's
+# default, and a per-service value equal to the default may not survive a save,
+# in which case the service silently inherits the GLOBAL list (often "*" as a
+# convenience) and admits every enrolled device. A kid that cannot exist is
+# stored, is not the default, and admits nobody; the gate treats it as a
+# non-existent kid and the UI hides it.
+NOBODY = "-"
+
+
+def _allow_set(value):
+    return set(x for x in (value or "").split() if x != NOBODY)
+
+
+def _allow_value(kids):
+    """The value to store for an allow-list: never empty, see NOBODY."""
+    kids = [k for k in kids if k != NOBODY]
+    return " ".join(kids) if kids else NOBODY
+
 
 def _write_tokens(db, entries, service_updates=None):
     """Rewrite the token slots to exactly `entries` (['kid:secret:label', ...]),
@@ -279,10 +299,10 @@ def _create(kwargs, db, request, Response):
     g_tok = fcfg.get("JIT_ACCESS_TOKENS", "")
     service_updates = {}
     for s in services:
-        cur = (fcfg.get(f"{s}_JIT_ACCESS_TOKENS", g_tok) or "").split()
+        cur = sorted(_allow_set(fcfg.get(f"{s}_JIT_ACCESS_TOKENS", g_tok)))
         if "*" not in cur and kid not in cur:
             cur.append(kid)
-        service_updates[s] = " ".join(cur)
+        service_updates[s] = _allow_value(cur)
 
     _write_tokens(db, entries, service_updates)
 
@@ -317,9 +337,12 @@ def _delete(kwargs, db, request, Response):
     g_tok = fcfg.get("JIT_ACCESS_TOKENS", "")
     service_updates = {}
     for s in (fcfg.get("SERVER_NAME") or "").split():
-        cur = (fcfg.get(f"{s}_JIT_ACCESS_TOKENS", g_tok) or "").split()
+        cur = _allow_set(fcfg.get(f"{s}_JIT_ACCESS_TOKENS", g_tok))
         if kid in cur:
-            service_updates[s] = " ".join(x for x in cur if x != kid)
+            # Removing the last kid must not leave the list EMPTY: that is the
+            # default, may not survive the save, and would let the site inherit
+            # the global list. Store the explicit nobody value instead.
+            service_updates[s] = _allow_value(sorted(cur - {kid}))
 
     _write_tokens(db, entries, service_updates or None)
     evicted, _ = _instance_post(kwargs, "/jitaccess/revoke-token", {"kid": kid})   # evict live grants now

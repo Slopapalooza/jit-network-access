@@ -67,7 +67,7 @@
       "help": "Base path for the challenge/respond/enroll endpoints on the protected origin. Advanced — keep the default unless it collides with a real path; enrolled devices knock on whatever prefix was active when they enrolled.",
       "id": "jit-access-uri-prefix",
       "label": "Protocol URI prefix",
-      "regex": "^/[A-Za-z0-9._~/-]+$",
+      "regex": "^/[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*$",
       "type": "text"
     },
     "JIT_ACCESS_NONCE_TTL": {
