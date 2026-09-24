@@ -7,6 +7,7 @@
 #   sudo ./install.sh                      # latest release for this architecture
 #   sudo ./install.sh --version v1.0.0     # a specific release
 #   sudo ./install.sh --binary ./jitaccess-authorizer   # one you built yourself
+#   sudo ./install.sh --prefix /opt      # binary under /opt/bin; the unit follows
 #   sudo ./install.sh --uninstall
 #
 # What it does, all of it idempotent:
@@ -39,7 +40,7 @@ warn() { printf '  \033[33mwarn\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[31merror\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '4,20p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '4,21p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
@@ -184,9 +185,12 @@ JSON
   GENERATED_KID="$KID"
 fi
 
-install -o root -g root -m 0644 \
-  "$(dirname "$0")/../systemd/jit-authorizer.service" "$UNIT" 2>/dev/null \
-  || die "could not find the systemd unit next to this script (expected ../systemd/jit-authorizer.service)"
+UNIT_SRC="$(dirname "$0")/../systemd/jit-authorizer.service"
+[ -f "$UNIT_SRC" ] || die "could not find the systemd unit next to this script (expected ../systemd/jit-authorizer.service)"
+# The unit hard-codes the default paths. --prefix moves the binary, so the unit
+# has to follow it, or systemd starts whatever is (or is not) at the old path.
+sed "s#^ExecStart=.*#ExecStart=$PREFIX/bin/$BIN_NAME -config $CONF#" "$UNIT_SRC" > "$TMP/jit-authorizer.service"
+install -o root -g root -m 0644 "$TMP/jit-authorizer.service" "$UNIT"
 systemctl daemon-reload
 ok "installed $UNIT"
 

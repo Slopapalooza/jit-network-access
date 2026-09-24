@@ -32,6 +32,9 @@ sudo ./debian/install.sh --binary ./jitaccess-authorizer
 | `/etc/systemd/system/jit-authorizer.service` | hardened unit |
 | user `jitaccess` | system user, no shell, no home |
 
+`--prefix /opt` puts the binary under `/opt/bin` instead, and the installed unit's
+`ExecStart` follows it.
+
 Re-running is safe: an existing config is never overwritten and the user is not
 recreated. Re-running with a newer `--version` is the upgrade path: the binary
 and unit are replaced and, if the service is running and either of them changed,
