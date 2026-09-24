@@ -198,9 +198,15 @@ end
 -- A rejection returns the SAME generic response as any other failure (PROTOCOL
 -- §6). Answering 429 here was an endpoint-discovery oracle: in stealth mode the
 -- protocol paths replied 429 while every other path replied 404.
-local function rate_ok(ip)
+--
+-- One bucket per service AND per source: keyed on the address alone, ten bad
+-- requests from an office NAT darkened every gated site on the instance for
+-- everyone behind it for a minute. IPv6 sources are bucketed by /64, so a
+-- single host on a routed /64 cannot mint a fresh bucket per request.
+local function rate_ok(sname, ip)
   if not cfg.rate_limit or cfg.rate_limit <= 0 then return true end
-  local n = store.rl:incr("rl:" .. ip, 1, 0, 60)
+  local src = ccanon.canon_ip(ip, 64) or ip
+  local n = store.rl:incr("rl:" .. sname .. ":" .. src, 1, 0, 60)
   -- incr fails when the dict is full or errors. Failing OPEN there means an
   -- attacker who fills the dict also switches the throttle off, so deny instead.
   if not n then return false end

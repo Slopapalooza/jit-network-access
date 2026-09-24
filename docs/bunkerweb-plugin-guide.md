@@ -118,7 +118,7 @@ settings can differ per service; `global` settings apply instance‑wide.
 | `JIT_ACCESS_NONCE_TTL` | `60` | global | Seconds a challenge nonce stays valid. Dominates knock freshness. |
 | `JIT_ACCESS_TRUST_REALIP` | `no` | global | Key grants on BunkerWeb's resolved real IP instead of the TCP peer. Enable **only** genuinely behind a trusted proxy with a narrowed `REAL_IP_FROM`. |
 | `JIT_ACCESS_IPV6_PREFIX` | `128` | global | IPv6 grant granularity. `128` = exact address. `64` = whole /64 (pair with `ip+cookie`). |
-| `JIT_ACCESS_RATELIMIT` | `10r/m` | global | Per‑IP rate limit on the knock endpoints. |
+| `JIT_ACCESS_RATELIMIT` | `10r/m` | global | Rate limit on the knock endpoints, per site and per source address (IPv6 by /64). |
 
 ---
 

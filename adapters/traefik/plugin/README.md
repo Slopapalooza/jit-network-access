@@ -89,7 +89,7 @@ labels:
 | `failureMode` | `interstitial` | or `stealth` (generic 404) |
 | `binding` | `ip` | or `ip+cookie` (device-bound; see below) |
 | `ipv6Prefix` | `128` | `64` admits a whole /64 |
-| `rateLimit` | `10` | knock attempts per minute per IP |
+| `rateLimit` | `10` | knock attempts per minute per source address (IPv6 by /64), per site |
 | `trustForwarded` | `false` | derive the client IP from `X-Forwarded-For` instead of the TCP peer; requires `trustedProxies` |
 | `trustedProxies` | — | CIDRs/addresses your own proxies occupy; mandatory with `trustForwarded` |
 

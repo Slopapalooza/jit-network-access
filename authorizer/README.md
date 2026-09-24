@@ -80,7 +80,7 @@ See [`config.example.json`](config.example.json). Keys:
 | `nonce_ttl` | `60` | challenge freshness window |
 | `enroll_ttl` | `86400` | enrollment link lifetime; clamped to 300–604800 |
 | `ipv6_prefix` | `128` | IPv6 grant granularity (`64` admits a whole /64) |
-| `rate_limit_per_min` | `10` | per-IP limit on the knock endpoints |
+| `rate_limit_per_min` | `10` | limit on the knock endpoints, per service and per source address (IPv6 by /64) |
 | `services.<name>.tokens` | — | allowed kids, or `["*"]` for any registered token |
 | `services.<name>.failure_mode` | `interstitial` | or `stealth` (generic 404) |
 | `services.<name>.binding` | `ip` | or `ip+cookie` (device-bound; see below) |

@@ -22,7 +22,7 @@ app.example.com {
 		# failure_mode interstitial      # or: stealth  (generic 404)
 		# binding      ip                # or: ip+cookie (device-bound)
 		# ipv6_prefix  128
-		# rate_limit   10                # knock attempts per minute per IP
+		# rate_limit   10                # knock attempts per minute per source address (IPv6 by /64), per site
 
 		# Only when Caddy is genuinely behind another proxy. Both lines are
 		# needed: trust_forwarded alone is refused at startup, because without

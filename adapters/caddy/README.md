@@ -61,7 +61,7 @@ needed.
 | `failure_mode` | `interstitial` | or `stealth` (generic 404, gate invisible) |
 | `binding` | `ip` | or `ip+cookie` (also requires the device's grant cookie) |
 | `ipv6_prefix` | `128` | `64` admits a whole /64 segment |
-| `rate_limit` | `10` | knock attempts per minute per IP |
+| `rate_limit` | `10` | knock attempts per minute per source address (IPv6 by /64), per site |
 | `trust_forwarded` | off | derive the client IP from `X-Forwarded-For` instead of the TCP peer; requires `trusted_proxies` |
 | `trusted_proxies` | — | CIDRs/addresses your own proxies occupy; mandatory with `trust_forwarded` |
 

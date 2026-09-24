@@ -232,10 +232,16 @@ function jitaccess:issue_grant_cookie(ttl)
   return ccrypto.sha256_hex(id)
 end
 
--- best-effort per-IP rate limit on knock endpoints (shared nonce dict, rl: prefix)
-function jitaccess:rate_ok(ip)
+-- Best-effort rate limit on the knock endpoints (dedicated rl dict, rl: prefix).
+--
+-- One bucket per service AND per source: keyed on the address alone, ten bad
+-- requests from an office NAT darkened every gated site on the instance for
+-- everyone behind it for a minute. IPv6 sources are bucketed by /64, so a
+-- single host on a routed /64 cannot mint a fresh bucket per request.
+function jitaccess:rate_ok(sname, ip)
   if not self.rate_limit or self.rate_limit <= 0 or not self.store then return true end
-  local n = self.store.rl:incr("rl:" .. ip, 1, 0, self.rate_window)
+  local src = ccanon.canon_ip(ip, 64) or ip
+  local n = self.store.rl:incr("rl:" .. sname .. ":" .. src, 1, 0, self.rate_window)
   -- incr fails when the dict is full or errors. Failing OPEN there means an
   -- attacker who fills the dict also switches the throttle off, so deny instead.
   if not n then return false end

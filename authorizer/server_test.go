@@ -702,11 +702,11 @@ func TestRateLimitOnEnroll(t *testing.T) {
 	}
 	// The limiter is shared with the other knock endpoints, so a burst against
 	// /enroll must consume the same budget rather than running unmetered.
-	if s.rl.allow("203.0.113.5", 3, s.now()) == false {
+	if s.rl.Allow(jitcore.RateKey(svcA, "203.0.113.5"), 3, s.now()) == false {
 		t.Log("(different IP unaffected, as expected)")
 	}
 	ip := mustClientIP(t, s, proxyIP)
-	if s.rl.allow(ip, 3, s.now()) {
+	if s.rl.Allow(jitcore.RateKey(svcA, ip), 3, s.now()) {
 		t.Error("/enroll attempts did not consume the rate-limit budget for that IP")
 	}
 }
@@ -736,6 +736,26 @@ func TestStealthModeGivesNoEndpointOracle(t *testing.T) {
 			t.Errorf("stealth oracle: rejected challenge #%d answered %d but an unknown path answered %d",
 				i, c, unknown)
 		}
+	}
+}
+
+// The knock limiter is per service. Keyed on the address alone, ten bad
+// requests from an office NAT darkened every gated site on the instance for
+// everyone behind it for a minute, with no hint on the interstitial.
+func TestKnockLimiterIsPerService(t *testing.T) {
+	s := testServer(t, func(c *Config) {
+		c.RateLimit = 2
+		c.Services[svcB] = ServiceConfig{Tokens: []string{testKid}}
+	})
+	prefix := s.config().URIPrefix
+	for i := 0; i < 3; i++ {
+		do(s, req(http.MethodGet, svcB, prefix+"/challenge", proxyIP, nil, nil))
+	}
+	if w := do(s, req(http.MethodGet, svcB, prefix+"/challenge", proxyIP, nil, nil)); w.Code == http.StatusNoContent {
+		t.Fatal("precondition: the flooded service should be throttled")
+	}
+	if w := do(s, req(http.MethodGet, svcA, prefix+"/challenge", proxyIP, nil, nil)); w.Code != http.StatusNoContent {
+		t.Errorf("a flood on one service throttled the same address on another: %d", w.Code)
 	}
 }
 
@@ -1037,15 +1057,16 @@ func TestSweepersReclaim(t *testing.T) {
 	s := testServer(t, func(c *Config) { c.RateLimit = 2 })
 	now := s.now()
 
-	// Rate-limit entries for many distinct sources, as a /64 sweep would create.
+	// Rate-limit entries for many distinct sources. Each is its own /64: hosts
+	// on ONE /64 share a bucket now, so a sweep across a /64 makes one entry.
 	for i := 0; i < 500; i++ {
-		s.rl.allow("2001:db8::"+strconv.Itoa(i), 10, now)
+		s.rl.Allow(jitcore.RateKey(svcA, "2001:db8:"+strconv.Itoa(i)+"::1"), 10, now)
 	}
-	if got := len(s.rl.window); got != 500 {
+	if got := s.rl.Len(); got != 500 {
 		t.Fatalf("precondition: %d limiter entries, want 500", got)
 	}
-	s.rl.sweep(now + 61) // a minute later every window is finished
-	if got := len(s.rl.window); got != 0 {
+	s.rl.Sweep(now + 61) // a minute later every window is finished
+	if got := s.rl.Len(); got != 0 {
 		t.Errorf("rate-limiter sweep left %d entries", got)
 	}
 

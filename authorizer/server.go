@@ -34,7 +34,7 @@ type Server struct {
 	codes  *jitcore.EnrollStore
 
 	nonceKey []byte
-	rl       *rateLimiter
+	rl       *jitcore.RateLimiter
 	metrics  *metrics
 	now      func() int64 // injectable for tests
 
@@ -58,7 +58,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		nonces:   jitcore.NewNonceStore(),
 		codes:    jitcore.NewEnrollStore(),
 		nonceKey: nk,
-		rl:       newRateLimiter(),
+		rl:       jitcore.NewRateLimiter(jitcore.DefaultRateLimitEntries),
 		metrics:  &metrics{},
 		now:      func() int64 { return time.Now().Unix() },
 	}, nil
@@ -215,7 +215,7 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := s.config()
-	if !s.rl.allow(c.ip, cfg.RateLimit, s.now()) {
+	if !s.rl.Allow(jitcore.RateKey(c.service, c.ip), cfg.RateLimit, s.now()) {
 		// deny(), not a bare 429: PROTOCOL §6 requires every rejection at these
 		// endpoints to be the SAME generic response. A 429 here was a free
 		// endpoint-discovery oracle — in stealth mode the protocol paths answered
@@ -261,7 +261,7 @@ func (s *Server) handleRespond(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := s.config()
-	if !s.rl.allow(c.ip, cfg.RateLimit, s.now()) {
+	if !s.rl.Allow(jitcore.RateKey(c.service, c.ip), cfg.RateLimit, s.now()) {
 		// deny(), not a bare 429: PROTOCOL §6 requires every rejection at these
 		// endpoints to be the SAME generic response. A 429 here was a free
 		// endpoint-discovery oracle — in stealth mode the protocol paths answered
@@ -380,7 +380,7 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	// PROTOCOL §2.1 requires this endpoint to be rate-limited, and it is the
 	// highest-value target in the protocol: it trades a code for a long-term
 	// device secret. It was the one knock endpoint with no throttle at all.
-	if !s.rl.allow(c.ip, s.config().RateLimit, s.now()) {
+	if !s.rl.Allow(jitcore.RateKey(c.service, c.ip), s.config().RateLimit, s.now()) {
 		s.knockFail(w, r, c, "rate limited")
 		return
 	}
@@ -584,45 +584,10 @@ func (s *Server) deny(w http.ResponseWriter, r *http.Request, c *reqCtx, reason 
 }
 
 // ---- rate limiting ---------------------------------------------------------
-
-// Fixed-window per-IP counter on the knock endpoints. Knock failures never feed
-// the WAF's abuse counters (SECURITY-REVIEW R4) — this is the only throttle.
-type rateLimiter struct {
-	mu     sync.Mutex
-	window map[string]*rlEntry
-}
-
-type rlEntry struct {
-	start int64
-	n     int
-}
-
-func newRateLimiter() *rateLimiter { return &rateLimiter{window: map[string]*rlEntry{}} }
-
-func (l *rateLimiter) allow(ip string, perMin int, now int64) bool {
-	if perMin <= 0 {
-		return true
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	e, ok := l.window[ip]
-	if !ok || now-e.start >= 60 {
-		l.window[ip] = &rlEntry{start: now, n: 1}
-		return true
-	}
-	e.n++
-	return e.n <= perMin
-}
-
-func (l *rateLimiter) sweep(now int64) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for k, e := range l.window {
-		if now-e.start >= 60 {
-			delete(l.window, k)
-		}
-	}
-}
+//
+// The knock throttle is jitcore.RateLimiter, shared by the Authorizer, Caddy
+// and Traefik engines: one bucket per service and per source (IPv6 by /64),
+// in a bounded table. Three private copies used to live here, none bounded.
 
 // ---- metrics ---------------------------------------------------------------
 
@@ -668,7 +633,7 @@ func (s *Server) StartSweeper(stop <-chan struct{}) {
 				s.grants.Sweep(now)
 				s.nonces.Sweep(now)
 				s.codes.Sweep(now)
-				s.rl.sweep(now)
+				s.rl.Sweep(now)
 			}
 		}
 	}()

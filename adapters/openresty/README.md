@@ -59,7 +59,7 @@ complete annotated example.
 | `nonce_ttl` | `60` | challenge freshness window |
 | `enroll_ttl` | `86400` | enrollment code lifetime |
 | `ipv6_prefix` | `128` | `64` admits a whole /64 segment |
-| `rate_limit` | `10` | knock attempts per minute per IP |
+| `rate_limit` | `10` | knock attempts per minute per source address (IPv6 by /64), per site |
 | `trust_forwarded` | `false` | key grants on the realip-resolved client instead of the TCP peer |
 
 `binding = "ip+cookie"` additionally binds a grant to the browser that knocked

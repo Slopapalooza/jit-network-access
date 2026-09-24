@@ -131,6 +131,7 @@ Pick one of these:
   default counted set — at the cost of the `X-JIT-Access` marker the extension
   uses for its recovery path.
 
-The knock endpoints have their own per-IP throttle (`JIT_ACCESS_RATELIMIT`), and
+The knock endpoints have their own throttle (`JIT_ACCESS_RATELIMIT`), per site and
+per source address (IPv6 by /64), and
 that one answers a throttled request with the same generic denial as everything
 else, so it never reveals which paths are protocol endpoints.

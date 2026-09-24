@@ -42,7 +42,7 @@ func resetShared(t *testing.T) {
 	sharedGrants = jitcore.NewGrantStore()
 	sharedNonces = jitcore.NewNonceStore()
 	sharedCodes = jitcore.NewEnrollStore()
-	sharedRL = newRateLimiter()
+	sharedRL = jitcore.NewRateLimiter(jitcore.DefaultRateLimitEntries)
 }
 
 func newHandler(t *testing.T, mutate func(*JITAccess)) *JITAccess {

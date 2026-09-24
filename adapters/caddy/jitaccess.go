@@ -71,7 +71,7 @@ var (
 	sharedGrants *jitcore.GrantStore
 	sharedNonces *jitcore.NonceStore
 	sharedCodes  *jitcore.EnrollStore
-	sharedRL     *rateLimiter
+	sharedRL     *jitcore.RateLimiter
 	nonceKey     []byte
 	sharedErr    error
 )
@@ -81,7 +81,7 @@ func shared() error {
 		sharedGrants = jitcore.NewGrantStore()
 		sharedNonces = jitcore.NewNonceStore()
 		sharedCodes = jitcore.NewEnrollStore()
-		sharedRL = newRateLimiter()
+		sharedRL = jitcore.NewRateLimiter(jitcore.DefaultRateLimitEntries)
 		nonceKey, sharedErr = jitcore.RandomBytes(32)
 	})
 	return sharedErr
@@ -112,7 +112,7 @@ func maybeSweep(now int64) {
 	sharedGrants.Sweep(now)
 	sharedNonces.Sweep(now)
 	sharedCodes.Sweep(now)
-	sharedRL.sweep(now)
+	sharedRL.Sweep(now)
 }
 
 // Token is one enrolled device.
@@ -365,7 +365,7 @@ func (j *JITAccess) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 		case r.URL.Path == p+"/respond" && r.Method == http.MethodPost:
 			return j.handleRespond(w, r, service, ip)
 		case r.URL.Path == p+"/enroll" && r.Method == http.MethodPost:
-			return j.handleEnroll(w, r, ip)
+			return j.handleEnroll(w, r, service, ip)
 		case r.URL.Path == p+"/register" && r.Method == http.MethodGet:
 			return j.handleRegister(w)
 		}
@@ -392,7 +392,7 @@ func (j *JITAccess) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 }
 
 func (j *JITAccess) handleChallenge(w http.ResponseWriter, service, ip string) error {
-	if !sharedRL.allow(ip, j.RateLimit, now()) {
+	if !sharedRL.Allow(jitcore.RateKey(service, ip), j.RateLimit, now()) {
 		// deny(), not a bare 429: PROTOCOL §6 requires every rejection at these
 		// endpoints to be the SAME generic response. A 429 here was a free
 		// endpoint-discovery oracle — in stealth mode the protocol paths answered
@@ -426,7 +426,7 @@ type respondBody struct {
 var dummySecret = make([]byte, 32)
 
 func (j *JITAccess) handleRespond(w http.ResponseWriter, r *http.Request, service, ip string) error {
-	if !sharedRL.allow(ip, j.RateLimit, now()) {
+	if !sharedRL.Allow(jitcore.RateKey(service, ip), j.RateLimit, now()) {
 		// deny(), not a bare 429: PROTOCOL §6 requires every rejection at these
 		// endpoints to be the SAME generic response. A 429 here was a free
 		// endpoint-discovery oracle — in stealth mode the protocol paths answered
@@ -518,11 +518,11 @@ func (j *JITAccess) handleRegister(w http.ResponseWriter) error {
 	return nil
 }
 
-func (j *JITAccess) handleEnroll(w http.ResponseWriter, r *http.Request, ip string) error {
+func (j *JITAccess) handleEnroll(w http.ResponseWriter, r *http.Request, service, ip string) error {
 	// PROTOCOL §2.1 requires this endpoint to be rate-limited, and it is the
 	// highest-value target in the protocol: it trades a code for a long-term
 	// device secret. It was the one knock endpoint with no throttle at all.
-	if !sharedRL.allow(ip, j.RateLimit, now()) {
+	if !sharedRL.Allow(jitcore.RateKey(service, ip), j.RateLimit, now()) {
 		return j.deny(w, "rate limited")
 	}
 	var body struct {
@@ -577,46 +577,10 @@ func MintEnrollCode(code, kid string, origins []string, exp int64) {
 var now = func() int64 { return time.Now().Unix() }
 
 // ---- rate limiting ---------------------------------------------------------
-
-type rateLimiter struct {
-	mu sync.Mutex
-	m  map[string]*rlEntry
-}
-type rlEntry struct {
-	start int64
-	n     int
-}
-
-func newRateLimiter() *rateLimiter { return &rateLimiter{m: map[string]*rlEntry{}} }
-
-// sweep drops finished windows. Without it every distinct source address left a
-// permanent entry: with the default ipv6_prefix of 128 an attacker sourcing from
-// a routed /64 could add one per request forever and eventually OOM the proxy
-// fronting every site, not just the gated one.
-func (l *rateLimiter) sweep(now int64) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for k, e := range l.m {
-		if now-e.start >= 60 {
-			delete(l.m, k)
-		}
-	}
-}
-
-func (l *rateLimiter) allow(ip string, perMin int, now int64) bool {
-	if perMin <= 0 {
-		return true
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	e, ok := l.m[ip]
-	if !ok || now-e.start >= 60 {
-		l.m[ip] = &rlEntry{start: now, n: 1}
-		return true
-	}
-	e.n++
-	return e.n <= perMin
-}
+//
+// The knock throttle is jitcore.RateLimiter, shared by the Authorizer, Caddy
+// and Traefik engines: one bucket per service and per source (IPv6 by /64),
+// in a bounded table. Three private copies used to live here, none bounded.
 
 // ---- caddyfile -------------------------------------------------------------
 
