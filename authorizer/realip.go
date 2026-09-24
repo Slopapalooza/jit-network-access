@@ -245,6 +245,23 @@ func (c *Config) resolveTarget(r *http.Request) (service, uri string, conflict b
 // ngx_http_parse_complex_uri before matching a location, while $request_uri and
 // $scheme://$http_host$request_uri keep the raw form. Normalizing here is what
 // keeps the verifier's view of the request identical to the proxy's.
+// muxWouldRedirect reports whether http.ServeMux would answer this path with
+// a redirect to its cleaned form (".", "..", "//") instead of routing it. The
+// recipes intercept only a 404 from the Authorizer, so on a stealth host that
+// 307 reached the client with the protocol prefix in its Location header,
+// naming the gate. Such paths are answered as unrouted instead. Mirrors the
+// mux's own cleanPath: path.Clean, keeping a trailing slash.
+func muxWouldRedirect(p string) bool {
+	if p == "" {
+		return false
+	}
+	np := path.Clean(p)
+	if strings.HasSuffix(p, "/") && np != "/" {
+		np += "/"
+	}
+	return np != p
+}
+
 func cleanURIPath(uri string) string {
 	if i := strings.IndexAny(uri, "?#"); i != -1 {
 		uri = uri[:i]

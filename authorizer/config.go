@@ -130,6 +130,18 @@ func (c *Config) finalize() error {
 		c.EnrollTTL = 604800
 	}
 
+	// The admin API mints grants with no token behind them, so its bearer is
+	// the most valuable string in this file. A placeholder is a bearer every
+	// reader of the example knows: the shipped example carried one that passed
+	// -check, so a copied example ran with a well-known backdoor. Refuse
+	// anything that looks like one, or is too short to have been generated.
+	if t := c.AdminToken; t != "" {
+		up := strings.ToUpper(t)
+		if len(t) < 16 || strings.Contains(up, "CHANGE") || strings.Contains(up, "REPLACE") || strings.Contains(up, "PLACEHOLDER") {
+			return fmt.Errorf("admin_token: use a random value of at least 16 characters (openssl rand -base64 32), or remove it to disable /admin")
+		}
+	}
+
 	c.trusted = nil
 	for _, s := range c.TrustedProxies {
 		p, err := netip.ParsePrefix(s)

@@ -66,6 +66,13 @@ func TestAuthzPrefixCarveOutRejectsTraversal(t *testing.T) {
 		// pass-through to the backend on this exact path.
 		"/.well-known/jit-access",
 		"/.well-known/jit-access/",
+		// Nor is anything else below the prefix. The carve-out used to wave
+		// through every path under it, so wherever the proxy failed to route
+		// the prefix to the Authorizer, any of these reached the backend.
+		"/.well-known/jit-access/nope",
+		"/.well-known/jit-access/challenge/extra",
+		"/.well-known/jit-access/challengex",
+		"/.well-known/jit-access/CHALLENGE",
 	}
 	for _, uri := range bypass {
 		// nginx auth_request convention
@@ -89,6 +96,8 @@ func TestAuthzPrefixCarveOutRejectsTraversal(t *testing.T) {
 	for _, uri := range []string{
 		"/.well-known/jit-access/challenge",
 		"/.well-known/jit-access/respond",
+		"/.well-known/jit-access/enroll",
+		"/.well-known/jit-access/register?code=abc",
 		"/.well-known/jit-access/challenge?cachebust=1",
 		"/a/../.well-known/jit-access/challenge",
 	} {

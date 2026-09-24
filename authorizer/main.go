@@ -57,6 +57,7 @@ func main() {
 	}
 
 	stop := make(chan struct{})
+	done := make(chan struct{}) // closed once Shutdown has finished draining
 	srv.StartSweeper(stop)
 
 	httpSrv := &http.Server{
@@ -123,6 +124,7 @@ func main() {
 					_ = adminSrv.Shutdown(ctx)
 				}
 				cancel()
+				close(done)
 				return
 			}
 		}
@@ -133,4 +135,10 @@ func main() {
 	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("listen: %v", err)
 	}
+	// ListenAndServe returns the moment Shutdown closes the listener, while
+	// Shutdown is still draining in-flight requests in the signal goroutine.
+	// Returning here ended the process mid-drain: a /respond could write its
+	// grant and lose its 204, and an in-flight /authz subrequest got a reset,
+	// which nginx turns into a 500. Wait for the drain to finish.
+	<-done
 }

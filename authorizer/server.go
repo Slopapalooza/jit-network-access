@@ -121,6 +121,13 @@ func (s *Server) Handler() http.Handler {
 	}
 	s.mu.Unlock()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Never let the mux redirect: a 307 to the cleaned path is not a 404,
+		// so the recipes pass it to the client, and on a stealth host its
+		// Location header named the protocol prefix.
+		if muxWouldRedirect(r.URL.Path) {
+			http.NotFound(w, r)
+			return
+		}
 		s.mu.RLock()
 		h := s.mux
 		s.mu.RUnlock()
@@ -513,13 +520,15 @@ func (s *Server) handleAuthz(w http.ResponseWriter, r *http.Request) {
 	// c.uri is normalized and comes from a conventions-agree-or-deny resolution,
 	// so this is the same path the proxy will route on.
 	uri := c.uri
-	// Only paths BELOW the prefix are carved out, never the bare prefix itself.
-	// The shipped recipes route `location /.well-known/jit-access/` (with the
-	// trailing slash) to the Authorizer, so the bare path falls into `location /`
-	// — gated — and answering 204 for it made it an ungated pass-through to the
-	// backend on that one path, with attacker-chosen method, query and body.
-	// Nothing needs the bare form: it is not an endpoint.
-	if p := cfg.URIPrefix; strings.HasPrefix(uri, p+"/") {
+	// Only the four endpoints are carved out, by exact name: never the bare
+	// prefix, and no longer anything else below it. The Authorizer serves the
+	// prefix itself, so nothing under it needs a 204 here; and wherever a
+	// proxy fails to route the prefix to the Authorizer (a missing or
+	// unadmitted protocol Ingress, a bare-prefix request falling into
+	// `location /`), a 204 for an arbitrary path under it was an ungated
+	// pass-through to the backend with attacker-chosen method, query and body.
+	// Four names shrink that surface to four.
+	if p := cfg.URIPrefix; uri == p+"/challenge" || uri == p+"/respond" || uri == p+"/enroll" || uri == p+"/register" {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}

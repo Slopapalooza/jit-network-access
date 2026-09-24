@@ -18,19 +18,18 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-    # Prefix over the whole tree, deliberately, and it must STAY a prefix.
+    # Prefix over the whole tree, so every path under it reaches the Authorizer
+    # and gets its own 404 for anything that is not an endpoint.
     #
-    # Narrowing this to Exact rules for the four endpoints looks like an
-    # improvement — less unauthenticated surface — and it is a live gate bypass.
-    # The Authorizer's /authz carve-out lets ANY path under the prefix through
-    # without a grant, because it assumes the proxy routes those paths to the
-    # Authorizer rather than to your app. Exact rules break that agreement: a
-    # request for /.well-known/jit-access/anything stops matching this Ingress,
-    # falls through to the gated rule, is waved through by the carve-out, and
-    # reaches the upstream unauthenticated. The lab caught exactly that.
-    #
-    # If this is ever narrowed, the Authorizer's carve-out has to be narrowed in
-    # the same change, not after it.
+    # This used to be load-bearing for security: the Authorizer's /authz
+    # carve-out waved through ANY path under the prefix without a grant, on the
+    # assumption that the proxy routed them here. Exact rules for the four
+    # endpoints then turned /.well-known/jit-access/anything into an ungated
+    # pass-through to the app (the lab caught exactly that). The carve-out is
+    # now exact too, so narrowing this Ingress would no longer expose the app;
+    # it would only route unknown paths under the prefix to the gated rule,
+    # where they are denied like any other path. Prefix remains the right
+    # shape: one rule, and the Authorizer answers everything under it.
     - host: app.example.com
       http:
         paths:

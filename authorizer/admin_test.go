@@ -26,7 +26,7 @@ func adminReq(t *testing.T, s *Server, method, path, body string) *http.Response
 		b = []byte(body)
 	}
 	r := req(method, "authorizer.internal", path, proxyIP, map[string]string{
-		"Authorization": "Bearer admin-secret",
+		"Authorization": "Bearer admin-secret-for-tests",
 		"Content-Type":  "application/json",
 	}, b)
 	return do(s, r).Result()

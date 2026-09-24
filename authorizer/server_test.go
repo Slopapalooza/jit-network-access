@@ -32,7 +32,7 @@ const (
 func testServer(t *testing.T, mutate func(*Config)) *Server {
 	t.Helper()
 	cfg := DefaultConfig()
-	cfg.AdminToken = "admin-secret"
+	cfg.AdminToken = "admin-secret-for-tests"
 	cfg.Tokens = []TokenConfig{{Kid: testKid, Secret: testSecret, Label: "test"}}
 	cfg.Services = map[string]ServiceConfig{
 		svcA: {Tokens: []string{testKid}},
@@ -289,7 +289,7 @@ func TestInternalSurfacesRefuseUntrustedPeers(t *testing.T) {
 	s := testServer(t, nil)
 	for _, path := range []string{"/authz", "/admin/grants", "/admin/metrics"} {
 		w := do(s, req(http.MethodGet, svcA, path, directIP,
-			map[string]string{"Authorization": "Bearer admin-secret"}, nil))
+			map[string]string{"Authorization": "Bearer admin-secret-for-tests"}, nil))
 		if w.Code != http.StatusForbidden {
 			t.Errorf("%s from an untrusted peer: got %d want 403", path, w.Code)
 		}
@@ -476,7 +476,7 @@ func TestEnrollCodeExchangeIsSingleUse(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{"kid": testKid, "origins": []string{"https://" + svcA}, "server": "https://" + svcA})
 	r := req(http.MethodPost, "authorizer.internal", "/admin/enroll-code", proxyIP,
-		map[string]string{"Authorization": "Bearer admin-secret"}, body)
+		map[string]string{"Authorization": "Bearer admin-secret-for-tests"}, body)
 	w := do(s, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("enroll-code: got %d body %s", w.Code, w.Body.String())
@@ -518,7 +518,7 @@ func TestAdminRequiresToken(t *testing.T) {
 		t.Errorf("wrong admin token: got %d want 401", w.Code)
 	}
 	if w := do(s, req(http.MethodGet, "authorizer.internal", "/admin/grants", proxyIP,
-		map[string]string{"Authorization": "Bearer admin-secret"}, nil)); w.Code != http.StatusOK {
+		map[string]string{"Authorization": "Bearer admin-secret-for-tests"}, nil)); w.Code != http.StatusOK {
 		t.Errorf("valid admin token: got %d want 200", w.Code)
 	}
 }
@@ -533,7 +533,7 @@ func TestRevokeTokenEvictsLiveGrants(t *testing.T) {
 	}
 	body, _ := json.Marshal(map[string]string{"kid": testKid})
 	w := do(s, req(http.MethodPost, "authorizer.internal", "/admin/revoke-token", proxyIP,
-		map[string]string{"Authorization": "Bearer admin-secret"}, body))
+		map[string]string{"Authorization": "Bearer admin-secret-for-tests"}, body))
 	if w.Code != http.StatusOK {
 		t.Fatalf("revoke-token: %d", w.Code)
 	}
@@ -550,7 +550,7 @@ func TestReloadDroppingTokenEvictsGrant(t *testing.T) {
 		t.Fatalf("knock: %d", w.Code)
 	}
 	nc := DefaultConfig()
-	nc.AdminToken = "admin-secret"
+	nc.AdminToken = "admin-secret-for-tests"
 	nc.Tokens = nil // token removed by the admin
 	nc.Services = map[string]ServiceConfig{svcA: {Tokens: []string{}}}
 	if err := nc.finalize(); err != nil {
@@ -581,7 +581,7 @@ func TestReloadRotatingSecretEvictsGrant(t *testing.T) {
 
 	rotated := bytes.Repeat([]byte{0x5a}, 32) // same kid, new secret
 	nc := DefaultConfig()
-	nc.AdminToken = "admin-secret"
+	nc.AdminToken = "admin-secret-for-tests"
 	nc.Tokens = []TokenConfig{{Kid: testKid, Secret: jitcore.B64u(rotated), Label: "test"}}
 	nc.Services = map[string]ServiceConfig{svcA: {Tokens: []string{testKid}}}
 	if err := nc.finalize(); err != nil {
@@ -621,7 +621,7 @@ func TestReloadToCookieBindingEvictsIPGrants(t *testing.T) {
 	}
 
 	nc := DefaultConfig()
-	nc.AdminToken = "admin-secret"
+	nc.AdminToken = "admin-secret-for-tests"
 	nc.Tokens = []TokenConfig{{Kid: testKid, Secret: testSecret, Label: "test"}}
 	nc.Services = map[string]ServiceConfig{svcA: {Tokens: []string{testKid}, Binding: jitcore.BindingIPCookie}}
 	if err := nc.finalize(); err != nil {
@@ -809,7 +809,7 @@ func TestAdminListenMovesAdminOffTheMainListener(t *testing.T) {
 	// default: no admin_listen -> /admin is on the main handler
 	s := testServer(t, nil)
 	w := do(s, req(http.MethodGet, svcA, "/admin/metrics", proxyIP,
-		map[string]string{"Authorization": "Bearer admin-secret"}, nil))
+		map[string]string{"Authorization": "Bearer admin-secret-for-tests"}, nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("default: /admin/metrics on the main listener: got %d want 200", w.Code)
 	}
@@ -817,7 +817,7 @@ func TestAdminListenMovesAdminOffTheMainListener(t *testing.T) {
 	// configured: /admin must be GONE from the main handler...
 	s2 := testServer(t, func(c *Config) { c.AdminListen = "127.0.0.1:9999" })
 	w2 := do(s2, req(http.MethodGet, svcA, "/admin/metrics", proxyIP,
-		map[string]string{"Authorization": "Bearer admin-secret"}, nil))
+		map[string]string{"Authorization": "Bearer admin-secret-for-tests"}, nil))
 	if w2.Code == http.StatusOK {
 		t.Error("admin_listen set but /admin/metrics still served on the main listener")
 	}
@@ -829,7 +829,7 @@ func TestAdminListenMovesAdminOffTheMainListener(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	ar := req(http.MethodGet, svcA, "/admin/metrics", proxyIP,
-		map[string]string{"Authorization": "Bearer admin-secret"}, nil)
+		map[string]string{"Authorization": "Bearer admin-secret-for-tests"}, nil)
 	ah.ServeHTTP(rec, ar)
 	if rec.Code != http.StatusOK {
 		t.Errorf("admin handler: got %d want 200", rec.Code)
@@ -838,7 +838,7 @@ func TestAdminListenMovesAdminOffTheMainListener(t *testing.T) {
 	// The admin listener still refuses untrusted peers and bad tokens.
 	rec2 := httptest.NewRecorder()
 	ah.ServeHTTP(rec2, req(http.MethodGet, svcA, "/admin/metrics", directIP,
-		map[string]string{"Authorization": "Bearer admin-secret"}, nil))
+		map[string]string{"Authorization": "Bearer admin-secret-for-tests"}, nil))
 	if rec2.Code == http.StatusOK {
 		t.Error("SECURITY: admin listener served an untrusted peer")
 	}
@@ -868,7 +868,7 @@ func TestReloadRebuildsRoutingTable(t *testing.T) {
 	}
 
 	cfg2 := DefaultConfig()
-	cfg2.AdminToken = "admin-secret"
+	cfg2.AdminToken = "admin-secret-for-tests"
 	cfg2.URIPrefix = "/.well-known/jit2"
 	cfg2.Tokens = []TokenConfig{{Kid: testKid, Secret: testSecret}}
 	cfg2.Services = map[string]ServiceConfig{svcA: {Tokens: []string{testKid}}}
@@ -899,7 +899,7 @@ func TestReloadRefusesListenChange(t *testing.T) {
 	} {
 		s := testServer(t, nil)
 		cfg2 := DefaultConfig()
-		cfg2.AdminToken = "admin-secret"
+		cfg2.AdminToken = "admin-secret-for-tests"
 		cfg2.Tokens = []TokenConfig{{Kid: testKid, Secret: testSecret}}
 		cfg2.Services = map[string]ServiceConfig{svcA: {Tokens: []string{testKid}}}
 		tc.mutol(cfg2)
@@ -944,6 +944,54 @@ func TestStealthIsByteIdenticalToPlatform404(t *testing.T) {
 	for name, w := range cases {
 		if got := shape(w); got != unrouted {
 			t.Errorf("%s is distinguishable from an unrouted path:\n  got      %q\n  unrouted %q", name, got, unrouted)
+		}
+	}
+}
+
+// http.ServeMux answers a path it would clean ("..", ".", "//") with a 307 to
+// the cleaned form before routing. The recipes intercept only a 404 from the
+// Authorizer, so that redirect reached the client, and on a stealth host its
+// Location header named the protocol prefix.
+func TestStealthHostNeverRedirects(t *testing.T) {
+	s := testServer(t, func(c *Config) {
+		c.Services[svcA] = ServiceConfig{Tokens: []string{testKid}, FailureMode: FailStealth}
+	})
+	prefix := s.config().URIPrefix
+	unrouted := do(s, req(http.MethodGet, svcA, "/definitely-not-a-route", proxyIP, nil, nil))
+	for _, p := range []string{
+		prefix + "//nope",
+		prefix + "/x/../challenge",
+		prefix + "/./challenge",
+		prefix + "/challenge/",
+		"/other//x",
+	} {
+		w := do(s, req(http.MethodGet, svcA, p, proxyIP, nil, nil))
+		if w.Code/100 == 3 || w.Header().Get("Location") != "" {
+			t.Errorf("%s: redirected (%d, Location %q) instead of the platform 404", p, w.Code, w.Header().Get("Location"))
+			continue
+		}
+		if w.Code != unrouted.Code || w.Body.String() != unrouted.Body.String() {
+			t.Errorf("%s: %d %q is distinguishable from an unrouted path (%d %q)", p, w.Code, w.Body.String(), unrouted.Code, unrouted.Body.String())
+		}
+	}
+}
+
+// The admin API mints grants with no token behind them, so a placeholder
+// bearer is a well-known backdoor. The shipped example carried one that passed
+// -check; a copied example ran with it.
+func TestPlaceholderAdminTokenRefused(t *testing.T) {
+	for _, bad := range []string{"CHANGE-ME-OR-REMOVE", "replace-me-with-something", "placeholder-token-xx", "short", "0123456789abcde"} {
+		cfg := DefaultConfig()
+		cfg.AdminToken = bad
+		if err := cfg.finalize(); err == nil {
+			t.Errorf("admin_token %q accepted", bad)
+		}
+	}
+	for _, ok := range []string{"", "K7f2mQ9pL1xR4vT8wZ3nB6cH0jD5sG2y"} {
+		cfg := DefaultConfig()
+		cfg.AdminToken = ok
+		if err := cfg.finalize(); err != nil {
+			t.Errorf("admin_token %q refused: %v", ok, err)
 		}
 	}
 }
