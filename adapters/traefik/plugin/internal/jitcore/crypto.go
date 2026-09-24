@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
+	"math"
 	"strings"
 )
 
@@ -24,10 +25,23 @@ const (
 func B64u(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
 // B64uDecode accepts padded or unpadded input (clients differ; the wire format
-// is unpadded).
+// is unpadded) and nothing else: only the base64url alphabet, with padding
+// confined to the end. Go's decoder silently skips embedded newlines, and the
+// Lua and Python references had leniencies of their own (a standard-alphabet
+// input decoded on one engine and not on another), so every reference now
+// rejects the same malformed spellings before decoding.
 func B64uDecode(s string) ([]byte, error) {
-	return base64.RawURLEncoding.DecodeString(strings.TrimRight(s, "="))
+	s = strings.TrimRight(s, "=")
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return nil, errB64uAlphabet
+		}
+	}
+	return base64.RawURLEncoding.DecodeString(s)
 }
+
+var errB64uAlphabet = errors.New("base64url: character outside the alphabet")
 
 // ---- primitives ------------------------------------------------------------
 
@@ -117,7 +131,12 @@ func VerifyNonce(nonceKey, nonce []byte, serverName, ip string, now, ttl int64, 
 	if !hmac.Equal(hmacSHA256(nonceKey, in), mac) {
 		return false, nil
 	}
-	if now < int64(ts) || now-int64(ts) >= ttl {
+	// ts is unsigned on the wire. Above MaxInt64 the int64 conversion goes
+	// negative, and `now-int64(ts)` wrapped back below ttl, so a nonce stamped
+	// 2^63 passed the freshness window at any `now` while the Python and Lua
+	// references rejected the same bytes. Unreachable without the nonce key,
+	// which can mint fresh nonces anyway, but the three references must agree.
+	if ts > math.MaxInt64 || now < int64(ts) || now-int64(ts) >= ttl {
 		return false, nil
 	}
 	return true, rand16

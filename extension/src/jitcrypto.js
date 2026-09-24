@@ -18,6 +18,12 @@ export function b64uEncode(bytes) {
 }
 
 export function b64uDecode(str) {
+  // Padded or unpadded, and nothing else: only the base64url alphabet, with
+  // padding confined to the end. atob() skips ASCII whitespace, and the server
+  // references had leniencies of their own, so every reference now rejects
+  // the same malformed spellings before decoding.
+  str = str.replace(/=+$/, "");
+  if (!/^[A-Za-z0-9_-]*$/.test(str)) throw new Error("base64url: character outside the alphabet");
   str = str.replace(/-/g, "+").replace(/_/g, "/");
   const pad = (4 - (str.length % 4)) % 4;
   const bin = atob(str + "=".repeat(pad));
@@ -99,7 +105,10 @@ export function canonServerName(host) {
   // differently, so a grant made via one would not match a request via the
   // other.
   if ((h.match(/:/g) || []).length === 1) {
-    const hp = h.match(/^(.*?):[0-9]+$/);
+    // [\s\S], not `.`: a JS dot skips line terminators, so a host containing
+    // one kept its port here while Go, Python and Lua stripped it. Unreachable
+    // from a real URL, but the four references must agree on every byte.
+    const hp = h.match(/^([\s\S]*?):[0-9]+$/);
     if (hp) h = hp[1];
   }
   return asciiLower(trimDotsAndSpace(h));

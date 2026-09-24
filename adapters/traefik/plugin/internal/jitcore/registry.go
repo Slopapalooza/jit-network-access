@@ -110,6 +110,7 @@ var (
 	ErrUnknownKid   = errors.New("unknown kid")
 	ErrTokenExpired = errors.New("token expired")
 	ErrNotAllowed   = errors.New("kid not allowed for service")
+	ErrBadAlg       = errors.New("token algorithm is not the pinned one")
 )
 
 // Authorize is the full policy check for a knock: known kid, not expired, and
@@ -120,6 +121,13 @@ func (r *Registry) Authorize(kid, serviceCanon string, now int64) (*Token, error
 	t := r.Lookup(kid)
 	if t == nil {
 		return nil, ErrUnknownKid
+	}
+	// SPEC §3 pins the algorithm per kid so a future second algorithm can
+	// never be negotiated down. The field was written by every loader and read
+	// by nobody, which made the pin decorative; it is enforced here and in the
+	// grant re-check so an unexpected value fails rather than defaults.
+	if t.Alg != AlgHMACSHA256 {
+		return nil, ErrBadAlg
 	}
 	if r.IsExpired(t, now) {
 		return nil, ErrTokenExpired

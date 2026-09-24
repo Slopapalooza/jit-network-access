@@ -161,7 +161,7 @@ func (s *GrantStore) IsAllowed(serviceCanon, ipCanon string, reg *Registry, now 
 	// explicit revoke still bound them.
 	if !g.Manual {
 		t := reg.Lookup(g.Kid)
-		if t == nil || reg.IsExpired(t, now) {
+		if t == nil || t.Alg != AlgHMACSHA256 || reg.IsExpired(t, now) {
 			return nil
 		}
 		// The per-service allow-list is re-checked too, not just registry

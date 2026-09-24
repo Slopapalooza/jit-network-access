@@ -22,7 +22,17 @@ NONCE_DOMAIN = b"jitaccess-nonce-v1"
 def b64u(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
 
+_B64U_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
 def b64u_dec(s: str) -> bytes:
+    # Padded or unpadded, and nothing else: only the base64url alphabet, with
+    # padding confined to the end. urlsafe_b64decode silently drops any byte
+    # outside the alphabet, and the Go and Lua references had leniencies of
+    # their own, so one malformed spelling decoded on one engine and not on
+    # another. Every reference now rejects the same inputs before decoding.
+    s = s.rstrip("=")
+    if s.strip(_B64U_ALPHABET):
+        raise ValueError("base64url: character outside the alphabet")
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
 # ---- PAE (PASETO-compatible) ----------------------------------------------

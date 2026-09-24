@@ -31,6 +31,17 @@ for (const c of V.proof) {
   ok(b64uEncode(b64uDecode(c.nonce_b64url)) === c.nonce_b64url, "b64u round-trip " + c.server_name);
 }
 
+// base64url is strict in every reference: only the alphabet, padding confined
+// to the end. atob() alone would skip whitespace and accept "=" mid-string.
+for (const good of ["", "AQ", "AQID", "AQID==", "-_-_"]) {
+  try { b64uDecode(good); } catch (e) { ok(false, "b64uDecode rejected well-formed " + JSON.stringify(good)); }
+}
+for (const bad of ["AQ\nID", "AQID=xyz", "AQ+D", "AQ/D", "AQ ID", "A=QID"]) {
+  let threw = false;
+  try { b64uDecode(bad); } catch (e) { threw = true; }
+  ok(threw, "b64uDecode accepted malformed " + JSON.stringify(bad));
+}
+
 console.log(fail === 0
   ? "extension jitcrypto vs vectors: ALL MATCH (WebCrypto interop with the Lua server)"
   : `${fail} FAILURES`);

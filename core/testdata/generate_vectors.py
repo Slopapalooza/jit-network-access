@@ -146,6 +146,11 @@ def build_vectors() -> dict:
         ("host:٤٤٣", "Arabic-Indic digits are not a port"),
         ("CAFÉ.example.com", "non-ASCII letters are left alone"),
         ("host ", "U+00A0 is not whitespace to trim"),
+        # Line terminators are not hostname characters, so nothing here is
+        # reachable from a URL, but the JS reference matched the host with `.`
+        # (which skips them) and kept the port the other three stripped.
+        ("ab\ncd:80", "a newline is not a port delimiter"),
+        ("ab cd:443", "nor is U+2028"),
     ]
     for host, note in name_cases:
         entry = {"in": host, "out": canon_server_name(host)}
@@ -316,6 +321,16 @@ def self_test() -> None:
     # expired nonce fails
     ok3, _ = verify_nonce(nk, n, "svc.example.com", "1.2.3.4", 2000, 60)
     assert not ok3
+    # base64url is strict: only the alphabet, padding confined to the end
+    for good in ("", "AQ", "AQID", "AQID==", "-_-_"):
+        b64u_dec(good)
+    for bad in ("AQ\nID", "AQID=xyz", "AQ+D", "AQ/D", "AQ ID", "A=QID"):
+        try:
+            b64u_dec(bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"b64u_dec accepted {bad!r}")
     print("  self-test: PASS (PAE injective, proof binds service, nonce binds ip+ttl)")
 
 

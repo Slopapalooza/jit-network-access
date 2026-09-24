@@ -134,6 +134,7 @@ function methods:is_allowed(sname_canon, ip_canon, registry, now, cookie_hash_pr
   if not rec.manual then
     local token = registry and registry:lookup(rec.kid)
     if not token then return nil end               -- kid revoked/unknown -> deny
+    if token.alg ~= "HMAC-SHA256" then return nil end   -- pinned per kid (SPEC §3)
     if registry:is_expired(token, now) then return nil end
     -- Re-check the per-service allow-list too, not just registry membership.
     -- Dropping a kid from one site's allow-list while leaving the token

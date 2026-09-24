@@ -118,7 +118,11 @@ async function finishEnroll(f, consented, usingCode) {
   }
   if (!kid || !origins.length) throw new Error("enrollment did not yield a kid/origins");
 
-  const secretBytes = b64uDecode(secretB64);
+  // The decoder is strict (only the alphabet, padding at the end), which is
+  // right for protocol data. A secret pasted by a person may carry a trailing
+  // newline or a wrap from the terminal it was copied out of, so whitespace is
+  // dropped here, at the human boundary, and nowhere else.
+  const secretBytes = b64uDecode(String(secretB64).replace(/\s+/g, ""));
   // Matches the floor every verifier enforces on its own registry (>= 16 bytes).
   // PROTOCOL §1 describes the secret as 32 bytes; raising this to 32 is a
   // coordinated protocol + all-verifiers change, not a client-side one.

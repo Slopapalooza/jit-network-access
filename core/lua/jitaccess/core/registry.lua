@@ -83,6 +83,10 @@ end
 function methods:authorize(kid, sname_canon, now)
   local token = self.tokens[kid]
   if not token then return nil, "unknown kid" end
+  -- SPEC §3 pins the algorithm per kid so a future second algorithm can never
+  -- be negotiated down. Every loader wrote the field and nothing read it, so
+  -- the pin was decorative; enforced here and in store:is_allowed.
+  if token.alg ~= "HMAC-SHA256" then return nil, "token algorithm is not the pinned one" end
   if self:is_expired(token, now) then return nil, "token expired" end
   if not self:allowed_for_service(kid, sname_canon) then return nil, "kid not allowed for service" end
   return token

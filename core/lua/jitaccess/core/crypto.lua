@@ -36,7 +36,15 @@ function _M.b64u_encode(s)
   return (b:gsub("[+/]", { ["+"] = "-", ["/"] = "_" }))
 end
 
+-- Padded or unpadded, and nothing else: only the base64url alphabet, with
+-- padding confined to the end. ngx.decode_base64 stops at the first "=" and
+-- ignores what follows, and the Go and Python references had leniencies of
+-- their own, so one malformed spelling decoded on one engine and not on
+-- another. Every reference now rejects the same inputs before decoding.
 function _M.b64u_decode(s)
+  if type(s) ~= "string" then return nil end
+  s = (s:gsub("=+$", ""))
+  if s:find("[^A-Za-z0-9_%-]") then return nil end
   s = (s:gsub("[-_]", { ["-"] = "+", ["_"] = "/" }))
   local rem = #s % 4
   if rem == 2 then s = s .. "=="
