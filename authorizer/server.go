@@ -537,6 +537,16 @@ func (s *Server) handleAuthz(w http.ResponseWriter, r *http.Request) {
 		cookie = ck.Value
 	}
 	if g := s.grants.IsAllowed(c.service, c.ip, s.registry(), s.now(), cookie); g != nil {
+		// A service switched to ip+cookie on reload keeps the ip-only grants
+		// minted before the switch, and the store cannot know the service's
+		// current binding. The operator asked for the stronger binding because
+		// the address alone stopped being enough, so those grants are not
+		// honored: the device re-knocks and gets a cookie-bound one.
+		if cfg.binding(c.svc) == jitcore.BindingIPCookie && g.Binding != jitcore.BindingIPCookie {
+			s.metrics.inc(&s.metrics.denied)
+			s.authzDeny(w, r, c, "grant binding weaker than the service requires")
+			return
+		}
 		s.metrics.inc(&s.metrics.granted)
 		w.Header().Set("X-JIT-Kid", g.Kid)
 		w.WriteHeader(http.StatusNoContent)

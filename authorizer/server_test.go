@@ -606,6 +606,53 @@ func TestReloadRotatingSecretEvictsGrant(t *testing.T) {
 	}
 }
 
+// Grants survive a reload by design. So when an operator discovers a shared
+// egress and switches a service to ip+cookie, the ip-only grants minted before
+// the switch were still honored until their TTL: exactly the exposure the
+// switch was meant to close. The re-check compared the grant to the registry,
+// never to the service's current binding.
+func TestReloadToCookieBindingEvictsIPGrants(t *testing.T) {
+	s := testServer(t, nil) // svcA: binding ip
+	if w := knock(t, s, svcA, proxyIP, nil, testKid, secretBytes(t)); w.Code != http.StatusNoContent {
+		t.Fatalf("knock: %d", w.Code)
+	}
+	if got := authz(s, svcA, proxyIP, "/", nil); got.Code != http.StatusNoContent {
+		t.Fatalf("precondition: ip-bound grant should admit, got %d", got.Code)
+	}
+
+	nc := DefaultConfig()
+	nc.AdminToken = "admin-secret"
+	nc.Tokens = []TokenConfig{{Kid: testKid, Secret: testSecret, Label: "test"}}
+	nc.Services = map[string]ServiceConfig{svcA: {Tokens: []string{testKid}, Binding: jitcore.BindingIPCookie}}
+	if err := nc.finalize(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Reload(nc); err != nil {
+		t.Fatal(err)
+	}
+	if got := authz(s, svcA, proxyIP, "/", nil); got.Code == http.StatusNoContent {
+		t.Error("SECURITY: an ip-only grant was honored after the service required ip+cookie")
+	}
+
+	// A fresh knock under the new binding works, with its cookie.
+	w := knock(t, s, svcA, proxyIP, nil, testKid, secretBytes(t))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("re-knock: %d", w.Code)
+	}
+	var ck *http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == GrantCookieName {
+			ck = c
+		}
+	}
+	if ck == nil {
+		t.Fatal("re-knock under ip+cookie set no grant cookie")
+	}
+	if got := authz(s, svcA, proxyIP, "/", map[string]string{"Cookie": GrantCookieName + "=" + ck.Value}); got.Code != http.StatusNoContent {
+		t.Errorf("cookie-bound grant should admit, got %d", got.Code)
+	}
+}
+
 // An unconfigured service is denied rather than passed through: opting in is
 // explicit, and the fail direction is closed.
 func TestUnknownServiceDenied(t *testing.T) {

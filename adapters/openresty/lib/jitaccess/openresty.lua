@@ -382,7 +382,12 @@ local function _access()
     return deny(svc)                                  -- any other path under the prefix stays dark
   end
 
-  if store:is_allowed(sname, ip, registry, ngx.time(), cookie_hash()) then
+  local rec = store:is_allowed(sname, ip, registry, ngx.time(), cookie_hash())
+  -- The shared dict keeps grants across a reload, so a service switched to
+  -- ip+cookie still holds the ip-only grants minted before the switch. The
+  -- operator asked for the stronger binding because the address alone stopped
+  -- being enough; those grants are not honored and the device re-knocks.
+  if rec and not (svc.binding == "ip+cookie" and rec.binding ~= "ip+cookie") then
     return                                            -- admitted: fall through to the upstream
   end
   return deny(svc)

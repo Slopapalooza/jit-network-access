@@ -360,6 +360,15 @@ func (j *JITAccess) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		cookie = ck.Value
 	}
 	if g := sharedGrants.IsAllowed(service, ip, j.reg, now(), cookie); g != nil {
+		// Grants survive a dynamic-config reload by design, so a router
+		// switched to ip+cookie still holds the ip-only grants minted before
+		// the switch. The operator asked for the stronger binding because the
+		// address alone stopped being enough; those grants are not honored and
+		// the device re-knocks for a cookie-bound one.
+		if j.cfg.Binding == jitcore.BindingIPCookie && g.Binding != jitcore.BindingIPCookie {
+			j.deny(w)
+			return
+		}
 		j.next.ServeHTTP(w, r)
 		return
 	}

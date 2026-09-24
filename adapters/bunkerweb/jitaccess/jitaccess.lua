@@ -449,6 +449,13 @@ function jitaccess:_access()
   -- Grant check
   local now = ngx.time()
   local rec = self.store:is_allowed(sname, ip, self.registry, now, self:cookie_hash())
+  -- The shared dict keeps grants across a reload, so a service switched to
+  -- ip+cookie still holds the ip-only grants minted before the switch. The
+  -- operator asked for the stronger binding because the address alone stopped
+  -- being enough; those grants are not honored and the device re-knocks.
+  if rec and (v["JIT_ACCESS_BINDING"] or "ip") == "ip+cookie" and rec.binding ~= "ip+cookie" then
+    rec = nil
+  end
   if rec then
     pcall(function()
       ngx.var.is_jit_allowed = "yes"

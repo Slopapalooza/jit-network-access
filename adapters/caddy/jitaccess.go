@@ -378,6 +378,14 @@ func (j *JITAccess) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 		cookie = ck.Value
 	}
 	if g := sharedGrants.IsAllowed(service, ip, j.reg, now(), cookie); g != nil {
+		// Grants survive a reload by design, so a site switched to ip+cookie
+		// still holds the ip-only grants minted before the switch. The
+		// operator asked for the stronger binding because the address alone
+		// stopped being enough; those grants are not honored and the device
+		// re-knocks for a cookie-bound one.
+		if j.Binding == jitcore.BindingIPCookie && g.Binding != jitcore.BindingIPCookie {
+			return j.deny(w, "grant binding weaker than the site requires")
+		}
 		return next.ServeHTTP(w, r)
 	}
 	return j.deny(w, "no grant")
