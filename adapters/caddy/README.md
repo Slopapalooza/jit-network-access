@@ -111,6 +111,24 @@ its own list the handler always walks the header from the right and takes the
 first address that is not one of your proxies, so a client-appended entry can
 never win.
 
+## Enrolling a device
+
+This engine has no admin API, so nothing on it mints enrollment codes and its
+`/enroll` endpoint only ever denies. Enroll a browser with the extension's
+manual setup string instead: the `kid` and `secret` from the `token` line, as
+described in the [extension guide](../../docs/chrome-extension-guide.md#enroll-a-device-manual-setup-string).
+The `enroll_ttl` option exists for parity with the other engines and has no
+effect here.
+
+## Secrets and Caddy's admin API
+
+Every `token` secret is plain configuration. Caddy serves the full running
+config, secrets included, from its admin endpoint (`GET /config/` on
+`localhost:2019` by default) and writes it to `autosave.json` on every load.
+Treat both as you would the Caddyfile itself: keep the admin endpoint on
+localhost or `admin off`, and consider `persist_config off` if the autosave
+location is more exposed than the Caddyfile.
+
 ## Operations
 
 - **State is process-wide and survives a config reload** (`caddy reload`), so

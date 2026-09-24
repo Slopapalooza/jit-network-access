@@ -11,18 +11,14 @@ See [How it works](../../../docs/how-it-works.md) for the protocol in diagrams.
 
 ## Install
 
-### Plugin catalog / remote
+### Local (the supported way)
 
-```yaml
-# static configuration
-experimental:
-  plugins:
-    jitaccess:
-      moduleName: github.com/Slopapalooza/jit-network-access/adapters/traefik/plugin
-      version: v0.1.0
-```
-
-### Local
+Traefik's `experimental.plugins` (the remote path) fetches only plugins listed
+in the [Plugin Catalog](https://plugins.traefik.io), and the catalog only
+indexes repositories with the `traefik-plugin` topic and a `.traefik.yml` and
+`go.mod` **at the repository root**. This plugin is a nested module of a larger
+repository, so it is not in the catalog and a `moduleName`/`version` entry
+cannot download it. Install it as a local plugin, which is how the lab runs it:
 
 ```bash
 mkdir -p plugins-local/src/github.com/Slopapalooza/jit-network-access/adapters/traefik
@@ -139,6 +135,21 @@ silently. With Traefik the common way to land there is an edge proxy listed in
 `trustedProxies` but missing from `forwardedHeaders.trustedIPs`: Traefik then
 drops the header before the plugin sees it, and every request is denied. That
 denial is the misconfiguration made visible; add the edge to both lists.
+
+## Enrolling a device
+
+This engine has no admin API, so nothing on it mints enrollment codes and its
+`/enroll` endpoint only ever denies. Enroll a browser with the extension's
+manual setup string instead: the `kid` and `secret` from the `tokens` entry, as
+described in the [extension guide](../../../docs/chrome-extension-guide.md#enroll-a-device-manual-setup-string).
+
+## Secrets and Traefik's API
+
+Every token secret is plain middleware configuration, and Traefik's API and
+dashboard return middleware configuration verbatim
+(`/api/http/middlewares/<name>@<provider>`). Keep `api.insecure` off and put
+the dashboard behind authentication, exactly as you would for any middleware
+that carries a credential.
 
 ## Development
 
