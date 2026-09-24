@@ -166,9 +166,15 @@ present and **denies when two disagree**. So a forged header makes the attacker'
 own request fail; it cannot select someone else's service or open the protocol
 carve-out.
 
-Blanking the unused ones with an `auth-snippet` is still worth doing — it turns a
-confusing denial into a clean one — but it is defense in depth now, not the thing
-standing between a client and someone else's grant:
+Blanking the unused ones with an `auth-snippet` turns a confusing denial into a
+clean one, but it is defense in depth, not the thing standing between a client
+and someone else's grant, and it is **not free**: a default ingress-nginx
+(1.9 and later) refuses any Ingress carrying a snippet annotation unless the
+controller is started with `allow-snippet-annotations: "true"` and
+`annotations-risk-level: Critical`, a cluster-wide relaxation that lets every
+Ingress author inject nginx config. The shipped manifest leaves the snippet
+commented out for that reason. If your cluster already allows snippets, this
+is the one to add:
 
 ```yaml
 nginx.ingress.kubernetes.io/auth-snippet: |
@@ -203,7 +209,7 @@ silently.
 |---|---|
 | `nginx.ingress.kubernetes.io/auth-url` | the Authorizer's `/authz` — this is the gate |
 | `nginx.ingress.kubernetes.io/auth-response-headers: X-JIT-Kid` | optional; passes the admitting kid to the backend for logging. `Set-Cookie` is **not** needed: `/authz` never sets one — the grant cookie comes from the knock, which reaches the browser through the ungated protocol Ingress |
-| `nginx.ingress.kubernetes.io/auth-snippet` | recommended; blanks the forwarding conventions the controller does not set, so a client cannot make its own request ambiguous |
+| `nginx.ingress.kubernetes.io/auth-snippet` | optional, commented out in the manifest; blanks the forwarding conventions the controller does not set, so a client cannot make its own request ambiguous. Needs `allow-snippet-annotations` and `annotations-risk-level: Critical` on the controller, or admission refuses the Ingress |
 
 ## Rotating tokens
 

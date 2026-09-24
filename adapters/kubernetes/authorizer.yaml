@@ -95,6 +95,10 @@ spec:
     metadata:
       labels: { app: jit-authorizer }
     spec:
+      # The Authorizer never talks to the API server; without this every pod
+      # gets a projected service-account token it has no use for, and a
+      # compromise of the process would hand it over.
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -103,8 +107,9 @@ spec:
           type: RuntimeDefault
       containers:
         - name: authorizer
-          # Build with: docker build -t <registry>/jitaccess-authorizer:0.1.0 authorizer/
-          image: ghcr.io/REPLACE/jitaccess-authorizer:0.1.0
+          # Published by the release workflow for linux/amd64 and linux/arm64.
+          # Pin the release you verified; :latest also exists.
+          image: ghcr.io/slopapalooza/jit-network-access/authorizer:1.0.0
           args: ["-config", "/etc/jitaccess/config.json"]
           ports:
             - name: http
